@@ -28,7 +28,7 @@ def parse_codex_output(
 
     Event types:
       thread.started  -> session_id
-      item.completed  -> agent_message text or reasoning
+      item.completed  -> agent_message text (reasoning items are skipped)
       turn.completed  -> usage stats
     """
     session_id: str | None = None

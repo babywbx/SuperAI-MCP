@@ -61,8 +61,8 @@ def read_files(paths: list[str], cd: str) -> str:
 
         target = (root / rel).resolve()
 
-        # Enforce containment
-        if not str(target).startswith(str(root)):
+        # Enforce containment (is_relative_to is prefix-safe unlike startswith)
+        if not target.is_relative_to(root):
             parts.append(f"--- {rel} ---\n(rejected: path traversal)")
             continue
 

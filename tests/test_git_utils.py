@@ -40,6 +40,16 @@ class TestReadFiles:
         result = read_files(["/etc/passwd"], str(tmp_path))
         assert "(rejected: absolute path)" in result
 
+    def test_reject_sibling_prefix_attack(self, tmp_path: Path) -> None:
+        # /tmp/repo vs /tmp/repo2 — startswith would pass, is_relative_to blocks
+        sibling = tmp_path.parent / (tmp_path.name + "2")
+        sibling.mkdir(exist_ok=True)
+        secret = sibling / "secret.txt"
+        secret.write_text("leaked")
+        rel = f"../{sibling.name}/secret.txt"
+        result = read_files([rel], str(tmp_path))
+        assert "(rejected: path traversal)" in result
+
 
 class TestValidateRef:
     def test_valid_refs(self) -> None:
