@@ -33,8 +33,8 @@ async def run_cli(
         cwd=cwd,
     )
 
-    assert proc.stdout is not None
-    assert proc.stderr is not None
+    if proc.stdout is None or proc.stderr is None:
+        raise RuntimeError("Failed to capture subprocess pipes")
 
     async def drain_lines(stream: asyncio.StreamReader) -> list[str]:
         lines: list[str] = []
@@ -57,6 +57,9 @@ async def run_cli(
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
+        stdout_task.cancel()
+        stderr_task.cancel()
+        await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
         raise
 
     stdout_lines, stderr = await asyncio.gather(stdout_task, stderr_task)

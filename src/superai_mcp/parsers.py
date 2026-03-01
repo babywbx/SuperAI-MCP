@@ -1,8 +1,22 @@
 """Parsers for Codex JSONL and Gemini stream-json output."""
 
 import json
+from typing import TypeAlias
 
 from superai_mcp.models import CLIResult
+
+JsonObject: TypeAlias = dict[str, object]
+
+
+def _parse_json_object(line: str) -> JsonObject | None:
+    """Parse a JSON line, returning dict or None for non-object/invalid."""
+    try:
+        data: object = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
 
 
 def parse_codex_output(
@@ -25,9 +39,8 @@ def parse_codex_output(
     for line in lines:
         if not line.strip():
             continue
-        try:
-            event: dict[str, object] = json.loads(line)
-        except json.JSONDecodeError:
+        event = _parse_json_object(line)
+        if event is None:
             continue
 
         if return_all:
@@ -36,7 +49,8 @@ def parse_codex_output(
         etype = event.get("type")
 
         if etype == "thread.started":
-            session_id = str(event.get("thread_id", ""))
+            tid = event.get("thread_id")
+            session_id = str(tid) if tid else None
 
         elif etype == "item.completed":
             item = event.get("item")
@@ -81,9 +95,8 @@ def parse_gemini_output(
     for line in lines:
         if not line.strip():
             continue
-        try:
-            event: dict[str, object] = json.loads(line)
-        except json.JSONDecodeError:
+        event = _parse_json_object(line)
+        if event is None:
             continue
 
         if return_all:
@@ -92,7 +105,8 @@ def parse_gemini_output(
         etype = event.get("type")
 
         if etype == "init":
-            session_id = str(event.get("session_id", ""))
+            sid = event.get("session_id")
+            session_id = str(sid) if sid else None
 
         elif etype == "message":
             if event.get("role") == "assistant":

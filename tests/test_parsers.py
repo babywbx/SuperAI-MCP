@@ -55,6 +55,15 @@ class TestCodexParser:
         r = parse_codex_output(["not json", "", '{"type":"thread.started","thread_id":"ok"}'])
         assert r.session_id == "ok"
 
+    def test_non_object_json(self) -> None:
+        r = parse_codex_output(['[]', '"string"', '123', 'null'])
+        assert r.success is False
+        assert r.content == "(no output)"
+
+    def test_missing_thread_id(self) -> None:
+        r = parse_codex_output(['{"type":"thread.started"}'])
+        assert r.session_id is None
+
 
 class TestGeminiParser:
     def test_basic(self) -> None:
@@ -86,3 +95,11 @@ class TestGeminiParser:
     def test_malformed_json(self) -> None:
         r = parse_gemini_output(["broken{", '{"type":"init","session_id":"ok"}'])
         assert r.session_id == "ok"
+
+    def test_non_object_json(self) -> None:
+        r = parse_gemini_output(['[1,2]', '"str"', '42'])
+        assert r.success is False
+
+    def test_missing_session_id(self) -> None:
+        r = parse_gemini_output(['{"type":"init"}'])
+        assert r.session_id is None
