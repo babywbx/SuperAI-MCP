@@ -1,8 +1,21 @@
 """Git diff and file reading helpers."""
 
+import re
 from pathlib import Path
 
 from superai_mcp.runner import run_cli
+
+# Only allow safe git refnames (no leading dash, no .., no special chars)
+_SAFE_REF = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_./-]*$")
+
+
+def _validate_ref(ref: str) -> str:
+    """Validate a git ref to prevent option injection."""
+    if not _SAFE_REF.match(ref):
+        raise ValueError(f"invalid git ref: {ref!r}")
+    if ".." in ref:
+        raise ValueError(f"'..' not allowed in git ref: {ref!r}")
+    return ref
 
 
 async def get_git_diff(
@@ -15,12 +28,18 @@ async def get_git_diff(
 
     - uncommitted: diff of unstaged + staged changes
     - base: diff relative to a branch (e.g. "main")
+
+    Raises ValueError if both uncommitted and base are set.
     """
+    if uncommitted and base:
+        raise ValueError("review_uncommitted and review_base are mutually exclusive")
+
     args: list[str] = ["diff"]
     if uncommitted:
         args.append("HEAD")
     elif base:
-        args.extend([f"{base}...HEAD"])
+        _validate_ref(base)
+        args.append(f"{base}...HEAD")
     else:
         return ""
 
@@ -31,16 +50,27 @@ async def get_git_diff(
 
 
 def read_files(paths: list[str], cd: str) -> str:
-    """Read file contents and format for prompt injection."""
-    root = Path(cd)
+    """Read file contents, enforcing path containment within cd."""
+    root = Path(cd).resolve()
     parts: list[str] = []
     for rel in paths:
-        fp = root / rel
-        if not fp.is_file():
+        # Reject absolute paths
+        if Path(rel).is_absolute():
+            parts.append(f"--- {rel} ---\n(rejected: absolute path)")
+            continue
+
+        target = (root / rel).resolve()
+
+        # Enforce containment
+        if not str(target).startswith(str(root)):
+            parts.append(f"--- {rel} ---\n(rejected: path traversal)")
+            continue
+
+        if not target.is_file():
             parts.append(f"--- {rel} ---\n(file not found)")
             continue
         try:
-            content = fp.read_text(encoding="utf-8", errors="replace")
+            content = target.read_text(encoding="utf-8", errors="replace")
         except OSError as e:
             parts.append(f"--- {rel} ---\n(read error: {e})")
             continue

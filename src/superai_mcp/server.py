@@ -13,25 +13,30 @@ from superai_mcp.runner import run_cli
 mcp = FastMCP("super")
 
 
-def _build_effective_prompt(
+def _err(msg: str) -> str:
+    """Return a JSON error response."""
+    return CLIResult(success=False, content=msg).model_dump_json()
+
+
+async def _build_context(
     prompt: str,
     *,
     cd: str,
     review_uncommitted: bool,
     review_base: str,
     files: list[str] | None,
-    diff_text: str,
 ) -> str:
-    """Build the final prompt with optional context injection."""
+    """Build prompt with optional diff/file context."""
     parts: list[str] = []
 
-    if diff_text:
-        label = "uncommitted changes" if review_uncommitted else f"changes vs {review_base}"
-        parts.append(f"Below is the git diff ({label}):\n\n```diff\n{diff_text}\n```")
+    if review_uncommitted or review_base:
+        diff_text = await get_git_diff(cd, uncommitted=review_uncommitted, base=review_base)
+        if diff_text:
+            label = "uncommitted changes" if review_uncommitted else f"changes vs {review_base}"
+            parts.append(f"Below is the git diff ({label}):\n\n```diff\n{diff_text}\n```")
 
     if files:
-        file_content = read_files(files, cd)
-        parts.append(f"Below are the file contents:\n\n{file_content}")
+        parts.append(f"Below are the file contents:\n\n{read_files(files, cd)}")
 
     parts.append(prompt)
     return "\n\n".join(parts)
@@ -60,25 +65,18 @@ async def codex_tool(
     """
     try:
         if not shutil.which("codex"):
-            return CLIResult(success=False, content="codex CLI not found in PATH").model_dump_json()
+            return _err("codex CLI not found in PATH")
 
-        # Build diff context if needed
-        diff_text = ""
-        if review_uncommitted or review_base:
-            diff_text = await get_git_diff(cd, uncommitted=review_uncommitted, base=review_base)
-
-        effective_prompt = _build_effective_prompt(
-            prompt, cd=cd,
-            review_uncommitted=review_uncommitted,
-            review_base=review_base,
-            files=files,
-            diff_text=diff_text,
-        )
-
-        # Build command args
+        # Resume mode: just resume the session, no context injection
         if session_id:
             args = ["exec", "resume", "--json", session_id]
         else:
+            effective_prompt = await _build_context(
+                prompt, cd=cd,
+                review_uncommitted=review_uncommitted,
+                review_base=review_base,
+                files=files,
+            )
             args = [
                 "exec", "--json",
                 "--sandbox", sandbox,
@@ -92,12 +90,8 @@ async def codex_tool(
             args.extend(["--", effective_prompt])
 
         result = await run_cli("codex", args, cwd=cd)
-        parsed = parse_codex_output(
-            result.stdout_lines,
-            return_all=return_all_messages,
-        )
+        parsed = parse_codex_output(result.stdout_lines, return_all=return_all_messages)
 
-        # If process failed but parser found no content, include stderr
         if result.returncode != 0 and not parsed.success:
             parsed = parsed.model_copy(update={
                 "content": f"(codex exit {result.returncode}): {result.stderr.strip()}"
@@ -106,9 +100,11 @@ async def codex_tool(
         return parsed.model_dump_json()
 
     except asyncio.TimeoutError:
-        return CLIResult(success=False, content="codex timed out (300s)").model_dump_json()
+        return _err("codex timed out")
+    except ValueError as e:
+        return _err(f"validation error: {e}")
     except Exception as e:
-        return CLIResult(success=False, content=f"codex error: {e}").model_dump_json()
+        return _err(f"codex error: {e}")
 
 
 @mcp.tool(name="gemini")
@@ -133,22 +129,16 @@ async def gemini_tool(
     """
     try:
         if not shutil.which("gemini"):
-            return CLIResult(success=False, content="gemini CLI not found in PATH").model_dump_json()
+            return _err("gemini CLI not found in PATH")
 
-        # Build diff context if needed
-        diff_text = ""
-        if review_uncommitted or review_base:
-            diff_text = await get_git_diff(cd, uncommitted=review_uncommitted, base=review_base)
-
-        effective_prompt = _build_effective_prompt(
+        # Resume mode uses --resume flag but still accepts a new prompt
+        effective_prompt = await _build_context(
             prompt, cd=cd,
             review_uncommitted=review_uncommitted,
             review_base=review_base,
             files=files,
-            diff_text=diff_text,
         )
 
-        # Build command args
         args = ["-p", effective_prompt, "-o", "stream-json"]
         if sandbox:
             args.append("--sandbox")
@@ -158,10 +148,7 @@ async def gemini_tool(
             args.extend(["--resume", session_id])
 
         result = await run_cli("gemini", args, cwd=cd)
-        parsed = parse_gemini_output(
-            result.stdout_lines,
-            return_all=return_all_messages,
-        )
+        parsed = parse_gemini_output(result.stdout_lines, return_all=return_all_messages)
 
         if result.returncode != 0 and not parsed.success:
             parsed = parsed.model_copy(update={
@@ -171,9 +158,11 @@ async def gemini_tool(
         return parsed.model_dump_json()
 
     except asyncio.TimeoutError:
-        return CLIResult(success=False, content="gemini timed out (300s)").model_dump_json()
+        return _err("gemini timed out")
+    except ValueError as e:
+        return _err(f"validation error: {e}")
     except Exception as e:
-        return CLIResult(success=False, content=f"gemini error: {e}").model_dump_json()
+        return _err(f"gemini error: {e}")
 
 
 def serve() -> None:
