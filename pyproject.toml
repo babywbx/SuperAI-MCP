@@ -1,0 +1,30 @@
+[project]
+name = "superai-mcp"
+version = "0.1.0"
+description = "MCP server wrapping Gemini CLI & Codex CLI as tools for Claude Code"
+readme = "README.md"
+authors = [
+    { name = "Babywbx", email = "5620530+babywbx@users.noreply.github.com" },
+]
+requires-python = ">=3.12"
+dependencies = [
+    "mcp[cli]>=1.26.0",
+    "pydantic>=2.0.0",
+]
+
+[project.scripts]
+superai-mcp = "superai_mcp:main"
+
+[build-system]
+requires = ["uv_build>=0.10.0,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.25.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
