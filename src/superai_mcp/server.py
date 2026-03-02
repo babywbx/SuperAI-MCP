@@ -4,9 +4,6 @@ import asyncio
 import json
 import os
 import shutil
-import tomllib
-from functools import lru_cache
-from pathlib import Path
 
 from collections.abc import Awaitable, Callable
 
@@ -49,68 +46,6 @@ _CODEX_EFFORT_CHAIN = ("high", "medium", "low")
 _PROBE_PROMPT = "reply ok"
 _PROBE_TIMEOUT = 30.0
 
-# Model detection probe for CLIs that don't report their model
-_MODEL_PROBE_PROMPT = (
-    'Reply ONLY with a JSON object: {"model": "<your exact model id>"}. '
-    "Nothing else, no markdown."
-)
-_MODEL_PROBE_TIMEOUT = 15.0
-
-
-@lru_cache(maxsize=4)
-def _read_default_model(cli: str) -> str | None:
-    """Read default model name from CLI config file (cached)."""
-    try:
-        if cli == "codex":
-            path = Path.home() / ".codex" / "config.toml"
-            if path.exists():
-                with path.open("rb") as f:
-                    data = tomllib.load(f)
-                val = data.get("model")
-                return str(val) if val else None
-        elif cli == "gemini":
-            path = Path.home() / ".gemini" / "settings.json"
-            if path.exists():
-                with path.open() as f:
-                    data = json.load(f)
-                val = data.get("defaultModel")
-                return str(val) if val else None
-    except Exception:
-        pass
-    return None
-
-
-# Cache for the Claude model probe (None = not probed yet, str = detected)
-_claude_default_model: str | None = None
-_claude_model_probed = False
-
-
-async def _probe_claude_model() -> str | None:
-    """Probe Claude CLI to detect its default model (cached after first call)."""
-    global _claude_default_model, _claude_model_probed  # noqa: PLW0603
-    if _claude_model_probed:
-        return _claude_default_model
-    _claude_model_probed = True
-    try:
-        env = _claude_env()
-        result = await run_cli(
-            "claude",
-            ["-p", _MODEL_PROBE_PROMPT, "--output-format", "json"],
-            cwd="/tmp",
-            env=env,
-            timeout=_MODEL_PROBE_TIMEOUT,
-        )
-        parsed = parse_claude_output(result.stdout_lines)
-        if parsed.success and parsed.content:
-            blob = json.loads(parsed.content.strip())
-            if isinstance(blob, dict):
-                val = blob.get("model")
-                if isinstance(val, str) and val:
-                    _claude_default_model = val
-    except Exception:
-        pass
-    return _claude_default_model
-
 
 def _err(msg: str) -> str:
     """Return a JSON error response."""
@@ -127,13 +62,13 @@ def _make_progress_cb(
     ctx: Context | None,
     tool_name: str,
     timeout: float,
-) -> Callable[[int], Awaitable[None]] | None:
+) -> Callable[[float], Awaitable[None]] | None:
     """Build an on_progress callback for run_cli, or None if ctx is unavailable."""
     if ctx is None:
         return None
 
-    async def _cb(elapsed: int) -> None:
-        await ctx.report_progress(float(elapsed), timeout, f"{tool_name} running ({elapsed}s)")
+    async def _cb(elapsed: float) -> None:
+        await ctx.report_progress(elapsed, timeout, f"{tool_name} running ({elapsed:.0f}s)")
 
     return _cb
 
@@ -750,6 +685,7 @@ async def broadcast_tool(
     try:
         validate_cd(cd)
         validate_commit_sha(review_commit)
+        validate_files(files)
         effective_prompt = await _build_context(
             prompt, cd=cd,
             review_uncommitted=review_uncommitted,

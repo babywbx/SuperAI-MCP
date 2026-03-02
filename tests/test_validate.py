@@ -6,6 +6,7 @@ import pytest
 
 from superai_mcp.validate import (
     validate_cd,
+    validate_commit_sha,
     validate_effort,
     validate_files,
     validate_max_budget,
@@ -126,6 +127,34 @@ class TestValidateMaxBudget:
     def test_negative(self) -> None:
         with pytest.raises(ValueError, match="invalid max_budget_usd"):
             validate_max_budget(-1.0)
+
+
+class TestValidateCommitSha:
+    def test_valid_short(self) -> None:
+        assert validate_commit_sha("abc1234") == "abc1234"
+
+    def test_valid_full(self) -> None:
+        sha = "a" * 40
+        assert validate_commit_sha(sha) == sha
+
+    def test_empty_ok(self) -> None:
+        assert validate_commit_sha("") == ""
+
+    def test_too_short(self) -> None:
+        with pytest.raises(ValueError, match="invalid commit SHA"):
+            validate_commit_sha("abc12")
+
+    def test_invalid_chars(self) -> None:
+        with pytest.raises(ValueError, match="invalid commit SHA"):
+            validate_commit_sha("xyz1234")
+
+    def test_flag_injection(self) -> None:
+        with pytest.raises(ValueError, match="invalid commit SHA"):
+            validate_commit_sha("--evil")
+
+    def test_path_injection(self) -> None:
+        with pytest.raises(ValueError, match="invalid commit SHA"):
+            validate_commit_sha("../../../etc/passwd")
 
 
 class TestValidateFiles:

@@ -19,5 +19,6 @@ class CLIResult(BaseModel):
     success: bool
     session_id: str | None = None
     content: str
+    model: str | None = None
     all_messages: list[dict[str, object]] | None = None
     usage: dict[str, object] | None = None

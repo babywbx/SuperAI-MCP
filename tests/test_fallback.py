@@ -94,6 +94,7 @@ class TestGeminiFallback:
         assert result["success"] is True
         assert "[fallback: flash]" in result["content"]
         assert "flash response" in result["content"]
+        assert result["model"] is not None
         assert _mock_run_cli.call_count == 2
 
         # Verify retry used --model flash
@@ -176,6 +177,7 @@ class TestClaudeFallback:
         assert result["success"] is True
         assert "[fallback: sonnet]" in result["content"]
         assert "sonnet response" in result["content"]
+        assert result["model"] == "sonnet"
         assert _mock_run_cli.call_count == 3
 
         # Verify probe used sonnet
@@ -203,6 +205,7 @@ class TestClaudeFallback:
         assert result["success"] is True
         assert "[fallback: haiku]" in result["content"]
         assert "haiku response" in result["content"]
+        assert result["model"] == "haiku"
         assert _mock_run_cli.call_count == 4
 
     @pytest.mark.usefixtures("_mock_which_claude")
@@ -222,6 +225,7 @@ class TestClaudeFallback:
 
         assert result["success"] is True
         assert "[fallback: haiku]" in result["content"]
+        assert result["model"] == "haiku"
         assert _mock_run_cli.call_count == 3
 
     @pytest.mark.usefixtures("_mock_which_claude")
@@ -323,6 +327,7 @@ class TestClaudeFallback:
 
         assert result["success"] is True
         assert "[fallback: haiku]" in result["content"]
+        assert result["model"] == "haiku"
         assert _mock_run_cli.call_count == 5
 
 
@@ -349,6 +354,8 @@ class TestCodexFallback:
         assert result["success"] is True
         assert "[fallback: effort=medium]" in result["content"]
         assert "medium answer" in result["content"]
+        # model comes from config file fallback or absent
+        assert result.get("model") != ""
         assert _mock_run_cli.call_count == 3
 
         # Verify retry used medium effort

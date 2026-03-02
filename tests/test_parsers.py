@@ -47,6 +47,7 @@ class TestClaudeParser:
         assert r.success is True
         assert r.session_id == "claude-789"
         assert r.content == "Hello from Claude"
+        assert r.model is None  # no model field in fixture
         assert r.usage is not None
         assert r.usage["input_tokens"] == 200
         assert r.all_messages is None
@@ -111,6 +112,12 @@ class TestClaudeParser:
         assert r.success is False
         assert r.content == "(no output)"
 
+    def test_model_extracted(self) -> None:
+        lines = ['{"session_id":"c","model":"claude-sonnet-4-6","usage":{},"result":"hi"}']
+        r = parse_claude_output(lines)
+        assert r.success is True
+        assert r.model == "claude-sonnet-4-6"
+
 
 class TestCodexParser:
     def test_basic(self) -> None:
@@ -118,6 +125,7 @@ class TestCodexParser:
         assert r.success is True
         assert r.session_id == "abc-123"
         assert r.content == "Hello"
+        assert r.model is None  # codex output has no model info
         assert r.usage is not None
         assert r.usage["input_tokens"] == 100
         assert r.all_messages is None
@@ -250,6 +258,7 @@ class TestGeminiParser:
         assert r.success is True
         assert r.session_id == "gem-456"
         assert r.content == "Hello there!"
+        assert r.model == "gemini-3"
         assert r.usage is not None
         assert r.usage["input_tokens"] == 50
 

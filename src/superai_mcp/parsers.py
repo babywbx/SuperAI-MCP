@@ -159,10 +159,13 @@ def parse_claude_output(
             usage = data.get("usage")
             if not isinstance(usage, dict):
                 usage = None
+            raw_model = data.get("model")
+            model = str(raw_model) if isinstance(raw_model, str) and raw_model else None
             return CLIResult(
                 success=bool(content),
                 session_id=session_id,
                 content=content or "(no output)",
+                model=model,
                 all_messages=[data] if return_all else None,
                 usage=usage,
             )
@@ -214,6 +217,7 @@ def parse_gemini_output(
     (e.g. "Please set an Auth method" when gemini is not configured).
     """
     session_id: str | None = None
+    model: str | None = None
     chunks: list[str] = []
     plain_lines: list[str] = []
     usage: dict[str, object] | None = None
@@ -238,6 +242,9 @@ def parse_gemini_output(
         if etype == "init":
             sid = event.get("session_id")
             session_id = str(sid) if sid else None
+            raw_model = event.get("model")
+            if isinstance(raw_model, str) and raw_model:
+                model = raw_model
 
         elif etype == "message":
             if event.get("role") == "assistant":
@@ -257,6 +264,7 @@ def parse_gemini_output(
             success=success,
             session_id=session_id,
             content=content,
+            model=model,
             all_messages=all_events if return_all else None,
             usage=usage,
         )
@@ -267,6 +275,7 @@ def parse_gemini_output(
         success=False,
         session_id=session_id,
         content=error_text,
+        model=model,
         all_messages=all_events if return_all else None,
         usage=usage,
     )

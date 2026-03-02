@@ -7,6 +7,7 @@ import pytest
 
 from superai_mcp.models import CLIResult
 from superai_mcp.server import broadcast_tool
+from superai_mcp.validate import MAX_FILES
 
 
 def _fake_result(name: str) -> str:
@@ -195,3 +196,13 @@ class TestResultsStructure:
         assert "test" in call_kwargs["prompt"]
         assert call_kwargs["cd"] == "/tmp"
         assert call_kwargs["model"] == "gpt-4"
+
+
+class TestBroadcastValidatesFiles:
+    async def test_too_many_files_rejected(self) -> None:
+        """broadcast_tool enforces MAX_FILES limit."""
+        big_list = [f"file{i}.py" for i in range(MAX_FILES + 1)]
+        raw = await broadcast_tool(prompt="hello", cd="/tmp", files=big_list)
+        result = json.loads(raw)
+        assert result["success"] is False
+        assert "too many files" in result["content"]

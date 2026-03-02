@@ -24,16 +24,19 @@ async def get_git_diff(
     *,
     uncommitted: bool = False,
     base: str = "",
+    commit: str = "",
 ) -> str:
     """Get git diff output.
 
     - uncommitted: diff of unstaged + staged changes
     - base: diff relative to a branch (e.g. "main")
+    - commit: diff for a single commit (SHA)
 
-    Raises ValueError if both uncommitted and base are set.
+    Only one of uncommitted/base/commit may be set.
     """
-    if uncommitted and base:
-        raise ValueError("review_uncommitted and review_base are mutually exclusive")
+    active = sum(bool(x) for x in (uncommitted, base, commit))
+    if active > 1:
+        raise ValueError("review_uncommitted, review_base, and review_commit are mutually exclusive")
 
     args: list[str] = ["diff"]
     if uncommitted:
@@ -41,6 +44,10 @@ async def get_git_diff(
     elif base:
         _validate_ref(base)
         args.append(f"{base}...HEAD")
+    elif commit:
+        _validate_ref(commit)
+        # Use diff-tree --root to handle root commits (no parent)
+        args = ["diff-tree", "--root", "-p", commit]
     else:
         return ""
 

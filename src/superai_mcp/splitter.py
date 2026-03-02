@@ -201,5 +201,6 @@ async def run_auto_split(
         success=all_success,
         session_id=session_id,
         content=format_aggregated_content(results),
+        model=phase1_result.model,
         usage=merge_usage(usages),
     )

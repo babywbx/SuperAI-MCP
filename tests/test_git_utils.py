@@ -1,10 +1,12 @@
 """Tests for git_utils module."""
 
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from superai_mcp.git_utils import _validate_ref, read_files
+from superai_mcp.git_utils import _validate_ref, get_git_diff, read_files
+from superai_mcp.runner import ProcessResult
 
 
 class TestReadFiles:
@@ -51,6 +53,28 @@ class TestReadFiles:
         assert "(rejected: path traversal)" in result
 
 
+class TestGetGitDiff:
+    async def test_no_params_returns_empty(self, tmp_path: Path) -> None:
+        result = await get_git_diff(str(tmp_path))
+        assert result == ""
+
+    async def test_mutually_exclusive_uncommitted_base(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            await get_git_diff(str(tmp_path), uncommitted=True, base="main")
+
+    async def test_mutually_exclusive_uncommitted_commit(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            await get_git_diff(str(tmp_path), uncommitted=True, commit="abc1234")
+
+    async def test_mutually_exclusive_base_commit(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            await get_git_diff(str(tmp_path), base="main", commit="abc1234")
+
+    async def test_mutually_exclusive_all_three(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            await get_git_diff(str(tmp_path), uncommitted=True, base="main", commit="abc1234")
+
+
 class TestValidateRef:
     def test_valid_refs(self) -> None:
         assert _validate_ref("main") == "main"
@@ -64,3 +88,28 @@ class TestValidateRef:
     def test_reject_double_dot(self) -> None:
         with pytest.raises(ValueError, match="not allowed"):
             _validate_ref("main..HEAD")
+
+
+class TestGetGitDiffCommit:
+    """Tests for review_commit mode using diff-tree --root."""
+
+    async def test_commit_uses_diff_tree_root(self, tmp_path: Path) -> None:
+        """commit mode calls 'git diff-tree --root -p <sha>'."""
+        fake = ProcessResult(returncode=0, stdout_lines=["diff output"], stderr="")
+        with patch("superai_mcp.git_utils.run_cli", new_callable=AsyncMock, return_value=fake) as mock:
+            result = await get_git_diff(str(tmp_path), commit="abc1234")
+
+        mock.assert_called_once()
+        args = mock.call_args[0]
+        assert args[0] == "git"
+        assert args[1] == ["diff-tree", "--root", "-p", "abc1234"]
+        assert result == "diff output"
+
+    async def test_commit_failure_returns_error(self, tmp_path: Path) -> None:
+        """Non-zero returncode returns error message."""
+        fake = ProcessResult(returncode=128, stdout_lines=[], stderr="bad object")
+        with patch("superai_mcp.git_utils.run_cli", new_callable=AsyncMock, return_value=fake):
+            result = await get_git_diff(str(tmp_path), commit="bad1234")
+
+        assert "git diff failed" in result
+        assert "bad object" in result

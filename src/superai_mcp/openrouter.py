@@ -44,13 +44,15 @@ def _is_cli_compatible(model_id: str) -> bool:
 
 async def fetch_models(provider: str = "") -> list[dict]:
     """Fetch model list from OpenRouter, optionally filtered by provider."""
-    cache_key = provider.strip("/").lower() or "_all"
+    # Normalize once to prevent cache key / filter prefix mismatch
+    provider = provider.strip("/").lower()
+    cache_key = provider or "_all"
     now = time.monotonic()
 
     if cache_key in _cache:
         expires, cached = _cache[cache_key]
         if now < expires:
-            return cached
+            return [dict(m) for m in cached]  # defensive copy
 
     def _fetch() -> dict:
         req = urllib.request.Request(
@@ -63,7 +65,7 @@ async def fetch_models(provider: str = "") -> list[dict]:
     models: list[dict] = raw.get("data", [])
 
     if provider:
-        prefix = provider.rstrip("/") + "/"
+        prefix = provider + "/"
         models = [m for m in models if m.get("id", "").startswith(prefix)]
     else:
         # Default: only the 3 main providers
@@ -75,7 +77,7 @@ async def fetch_models(provider: str = "") -> list[dict]:
     models = [m for m in models if _is_cli_compatible(m.get("id", ""))]
     result = [_simplify(m) for m in models]
     _cache[cache_key] = (now + _CACHE_TTL, result)
-    return result
+    return [dict(m) for m in result]  # defensive copy
 
 
 def _simplify(m: dict) -> dict:

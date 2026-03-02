@@ -14,6 +14,8 @@ _MODEL_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/-]{0,127}$")
 _VALID_EFFORT = frozenset({"low", "medium", "high", "xhigh"})
 _VALID_CLAUDE_EFFORT = frozenset({"low", "medium", "high"})
 
+_COMMIT_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
+
 MAX_FILES = 50
 MAX_FILE_BYTES = 2 * 1024 * 1024  # 2 MB per file
 
@@ -68,6 +70,13 @@ def validate_max_budget(budget: float) -> float:
     if budget < 0:
         raise ValueError(f"invalid max_budget_usd: {budget}, must be >= 0")
     return budget
+
+
+def validate_commit_sha(sha: str) -> str:
+    """Validate commit SHA format (7-40 hex characters)."""
+    if sha and not _COMMIT_RE.match(sha):
+        raise ValueError(f"invalid commit SHA: {sha!r}")
+    return sha
 
 
 def validate_files(files: list[str] | None) -> list[str] | None:

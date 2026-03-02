@@ -59,6 +59,78 @@ async def test_run_env_removes_var() -> None:
     assert result.stdout_lines == ["unset"]
 
 
+async def test_progress_callback_called() -> None:
+    """on_progress is called during long-running commands."""
+    from unittest.mock import AsyncMock
+
+    from superai_mcp.runner import _PROGRESS_INTERVAL
+
+    progress_mock = AsyncMock()
+
+    # Use a process that sleeps for longer than the interval
+    # We temporarily reduce the interval for testing
+    import superai_mcp.runner as runner_mod
+    original_interval = runner_mod._PROGRESS_INTERVAL
+    runner_mod._PROGRESS_INTERVAL = 0.1  # 100ms for fast test
+    try:
+        result = await run_cli(
+            "sleep", ["0.35"],
+            timeout=5.0,
+            on_progress=progress_mock,
+        )
+    finally:
+        runner_mod._PROGRESS_INTERVAL = original_interval
+
+    assert result.returncode == 0
+    # Should have been called at least twice (at 100ms, 200ms)
+    assert progress_mock.call_count >= 2
+
+
+async def test_progress_callback_none() -> None:
+    """on_progress=None (default) works fine."""
+    result = await run_cli("echo", ["ok"], on_progress=None)
+    assert result.returncode == 0
+    assert result.stdout_lines == ["ok"]
+
+
+async def test_progress_callback_exception_cleans_up() -> None:
+    """Subprocess is killed when on_progress raises an exception."""
+    import superai_mcp.runner as runner_mod
+
+    original_interval = runner_mod._PROGRESS_INTERVAL
+    runner_mod._PROGRESS_INTERVAL = 0.1
+
+    async def _bad_progress(elapsed: int) -> None:
+        raise RuntimeError("callback boom")
+
+    try:
+        with pytest.raises(RuntimeError, match="callback boom"):
+            await run_cli("sleep", ["10"], timeout=5.0, on_progress=_bad_progress)
+    finally:
+        runner_mod._PROGRESS_INTERVAL = original_interval
+
+
+async def test_progress_elapsed_uses_float() -> None:
+    """Elapsed time is tracked as float, not truncated to 0 for short intervals."""
+    import superai_mcp.runner as runner_mod
+
+    original_interval = runner_mod._PROGRESS_INTERVAL
+    runner_mod._PROGRESS_INTERVAL = 0.05  # 50ms
+
+    elapsed_values: list[float] = []
+
+    async def _track(elapsed: float) -> None:
+        elapsed_values.append(elapsed)
+
+    try:
+        await run_cli("sleep", ["0.2"], timeout=5.0, on_progress=_track)
+    finally:
+        runner_mod._PROGRESS_INTERVAL = original_interval
+
+    # With float tracking, at least one callback should report elapsed > 0
+    assert any(e > 0 for e in elapsed_values), f"all elapsed were 0: {elapsed_values}"
+
+
 def test_process_result_frozen() -> None:
     r = ProcessResult(returncode=0, stdout_lines=["a"], stderr="")
     with pytest.raises(AttributeError):

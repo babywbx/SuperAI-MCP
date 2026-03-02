@@ -1,8 +1,12 @@
 """Async subprocess runner for CLI tools."""
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# Interval in seconds between progress callbacks
+_PROGRESS_INTERVAL = 25.0
 
 
 @dataclass(frozen=True)
@@ -21,10 +25,12 @@ async def run_cli(
     cwd: str | Path | None = None,
     env: dict[str, str] | None = None,
     timeout: float = 300.0,
+    on_progress: Callable[[float], Awaitable[None]] | None = None,
 ) -> ProcessResult:
     """Run a CLI command asynchronously and capture output.
 
     Raises asyncio.TimeoutError if the process exceeds `timeout` seconds.
+    Calls on_progress(elapsed_seconds) every ~25s while waiting.
     """
     proc = await asyncio.create_subprocess_exec(
         command,
@@ -56,13 +62,30 @@ async def run_cli(
     stderr_task = asyncio.create_task(drain_all(proc.stderr))
 
     try:
-        await asyncio.wait_for(proc.wait(), timeout=timeout)
-    except asyncio.TimeoutError:
+        wait_task = asyncio.create_task(proc.wait())
+        elapsed = 0.0
+        remaining = timeout
+
+        while True:
+            interval = min(_PROGRESS_INTERVAL, remaining)
+            done, _ = await asyncio.wait({wait_task}, timeout=interval)
+            if done:
+                break
+            elapsed += interval
+            remaining -= interval
+            if remaining <= 0:
+                raise asyncio.TimeoutError()
+            if on_progress is not None:
+                await on_progress(elapsed)
+    except BaseException:
         proc.kill()
         await proc.wait()
+        wait_task.cancel()
         stdout_task.cancel()
         stderr_task.cancel()
-        await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+        await asyncio.gather(
+            wait_task, stdout_task, stderr_task, return_exceptions=True,
+        )
         raise
 
     stdout_lines, stderr = await asyncio.gather(stdout_task, stderr_task)

@@ -385,6 +385,35 @@ class TestCache:
         assert mock.call_count == 2
 
 
+class TestProviderCaseNormalization:
+    """Provider input is case-insensitive and won't poison cache."""
+
+    async def test_uppercase_provider_matches(self) -> None:
+        with patch("superai_mcp.openrouter.urllib.request.urlopen", return_value=_mock_urlopen()):
+            models = await fetch_models("Anthropic")
+        assert len(models) == 1
+        assert models[0]["id"] == "anthropic/claude-sonnet-4"
+
+    async def test_mixed_case_shares_cache(self) -> None:
+        """'Google' and 'google' should share the same cache entry."""
+        mock = _mock_urlopen()
+        with patch("superai_mcp.openrouter.urllib.request.urlopen", return_value=mock):
+            await fetch_models("Google")
+            await fetch_models("google")
+        mock.read.assert_called_once()
+
+
+class TestCacheDefensiveCopy:
+    """Cached results are not affected by caller mutation."""
+
+    async def test_mutation_does_not_affect_cache(self) -> None:
+        with patch("superai_mcp.openrouter.urllib.request.urlopen", return_value=_mock_urlopen()):
+            models1 = await fetch_models("anthropic")
+            models1[0]["id"] = "MUTATED"
+            models2 = await fetch_models("anthropic")
+        assert models2[0]["id"] == "anthropic/claude-sonnet-4"
+
+
 class TestProviderConstants:
     """Verify the PROVIDERS constant covers the expected set."""
 
