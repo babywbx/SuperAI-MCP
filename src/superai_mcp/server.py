@@ -9,13 +9,30 @@ from superai_mcp.git_utils import get_git_diff, read_files
 from superai_mcp.models import CLIResult, Sandbox
 from superai_mcp.parsers import parse_codex_output, parse_gemini_output
 from superai_mcp.runner import run_cli
+from superai_mcp.validate import (
+    validate_cd,
+    validate_files,
+    validate_model,
+    validate_reasoning_effort,
+    validate_sandbox,
+    validate_session_id,
+)
 
 mcp = FastMCP("super")
+
+# Max stderr chars to include in error responses
+_MAX_STDERR = 500
 
 
 def _err(msg: str) -> str:
     """Return a JSON error response."""
     return CLIResult(success=False, content=msg).model_dump_json()
+
+
+def _safe_stderr(stderr: str) -> str:
+    """Truncate stderr to avoid leaking sensitive info."""
+    s = stderr.strip()
+    return s[:_MAX_STDERR] if len(s) > _MAX_STDERR else s
 
 
 async def _build_context(
@@ -67,6 +84,14 @@ async def codex_tool(
         if not shutil.which("codex"):
             return _err("codex CLI not found in PATH")
 
+        # Validate all inputs
+        validate_cd(cd)
+        validated_sandbox = validate_sandbox(sandbox)
+        validate_session_id(session_id)
+        validate_model(model)
+        validate_reasoning_effort(reasoning_effort)
+        validate_files(files)
+
         # Resume mode: just resume the session, no context injection
         if session_id:
             args = ["exec", "resume", "--json", session_id]
@@ -79,7 +104,7 @@ async def codex_tool(
             )
             args = [
                 "exec", "--json",
-                "--sandbox", sandbox,
+                "--sandbox", validated_sandbox.value,
                 "--cd", cd,
                 "--skip-git-repo-check",
             ]
@@ -94,7 +119,7 @@ async def codex_tool(
 
         if result.returncode != 0 and not parsed.success:
             parsed = parsed.model_copy(update={
-                "content": f"(codex exit {result.returncode}): {result.stderr.strip()}"
+                "content": f"codex exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
             })
 
         return parsed.model_dump_json()
@@ -102,9 +127,9 @@ async def codex_tool(
     except asyncio.TimeoutError:
         return _err("codex timed out")
     except ValueError as e:
-        return _err(f"validation error: {e}")
-    except Exception as e:
-        return _err(f"codex error: {e}")
+        return _err(str(e))
+    except Exception:
+        return _err("codex internal error")
 
 
 @mcp.tool(name="gemini")
@@ -131,7 +156,12 @@ async def gemini_tool(
         if not shutil.which("gemini"):
             return _err("gemini CLI not found in PATH")
 
-        # Resume mode uses --resume flag but still accepts a new prompt
+        # Validate all inputs
+        validate_cd(cd)
+        validate_session_id(session_id)
+        validate_model(model)
+        validate_files(files)
+
         effective_prompt = await _build_context(
             prompt, cd=cd,
             review_uncommitted=review_uncommitted,
@@ -152,7 +182,7 @@ async def gemini_tool(
 
         if result.returncode != 0 and not parsed.success:
             parsed = parsed.model_copy(update={
-                "content": f"(gemini exit {result.returncode}): {result.stderr.strip()}"
+                "content": f"gemini exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
             })
 
         return parsed.model_dump_json()
@@ -160,9 +190,9 @@ async def gemini_tool(
     except asyncio.TimeoutError:
         return _err("gemini timed out")
     except ValueError as e:
-        return _err(f"validation error: {e}")
-    except Exception as e:
-        return _err(f"gemini error: {e}")
+        return _err(str(e))
+    except Exception:
+        return _err("gemini internal error")
 
 
 def serve() -> None:

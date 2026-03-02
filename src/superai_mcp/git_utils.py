@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 from superai_mcp.runner import run_cli
+from superai_mcp.validate import MAX_FILE_BYTES
 
 # Only allow safe git refnames (no leading dash, no .., no special chars)
 _SAFE_REF = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_./-]*$")
@@ -70,9 +71,13 @@ def read_files(paths: list[str], cd: str) -> str:
             parts.append(f"--- {rel} ---\n(file not found)")
             continue
         try:
+            size = target.stat().st_size
+            if size > MAX_FILE_BYTES:
+                parts.append(f"--- {rel} ---\n(skipped: {size} bytes exceeds limit)")
+                continue
             content = target.read_text(encoding="utf-8", errors="replace")
-        except OSError as e:
-            parts.append(f"--- {rel} ---\n(read error: {e})")
+        except OSError:
+            parts.append(f"--- {rel} ---\n(read error)")
             continue
         parts.append(f"--- {rel} ---\n{content}")
     return "\n\n".join(parts)

@@ -64,7 +64,7 @@ async def run_cli(
 
     stdout_lines, stderr = await asyncio.gather(stdout_task, stderr_task)
     return ProcessResult(
-        returncode=proc.returncode or 0,
+        returncode=proc.returncode if proc.returncode is not None else -1,
         stdout_lines=stdout_lines,
         stderr=stderr,
     )
