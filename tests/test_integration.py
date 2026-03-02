@@ -10,7 +10,7 @@ import shutil
 
 import pytest
 
-from superai_mcp.server import claude_tool, codex_tool, gemini_tool
+from superai_mcp.server import broadcast_tool, claude_tool, codex_tool, gemini_tool
 
 pytestmark = pytest.mark.integration
 
@@ -184,6 +184,46 @@ class TestClaudeIntegration:
         result = json.loads(raw)
         assert result["success"] is False
         assert "mutually exclusive" in result["content"]
+
+
+# -- Broadcast tests --
+
+
+class TestBroadcastIntegration:
+    async def test_broadcast_all(self) -> None:
+        """Broadcast to all targets returns three results."""
+        raw = await broadcast_tool(prompt="Reply with exactly: HELLO", cd="/tmp")
+        result = json.loads(raw)
+        assert result["success"] is True
+        assert "results" in result
+        # Each installed CLI should have a result (success or not)
+        for target in ("codex", "gemini", "claude"):
+            if target in result["results"]:
+                assert "success" in result["results"][target]
+
+    async def test_broadcast_subset(self) -> None:
+        """Broadcast to a single target returns only that result."""
+        # Pick whichever CLI is available
+        target = None
+        for name, skip in [("codex", SKIP_CODEX), ("gemini", SKIP_GEMINI), ("claude", SKIP_CLAUDE)]:
+            if not skip:
+                target = name
+                break
+        if target is None:
+            pytest.skip("no CLI installed")
+
+        raw = await broadcast_tool(prompt="Say OK", cd="/tmp", targets=[target])
+        result = json.loads(raw)
+        assert result["success"] is True
+        assert set(result["results"].keys()) == {target}
+        assert result["results"][target]["success"] is True
+
+    async def test_broadcast_invalid_target(self) -> None:
+        """Invalid target returns error without calling any CLI."""
+        raw = await broadcast_tool(prompt="hello", cd="/tmp", targets=["nonexistent"])
+        result = json.loads(raw)
+        assert result["success"] is False
+        assert "invalid target" in result["content"]
 
 
 # -- Cross-tool parallel test --

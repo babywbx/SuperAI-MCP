@@ -4,34 +4,107 @@
 
 ## ✨ 特性
 
-- 🔧 **三工具**: `mcp__super__codex` + `mcp__super__gemini` + `mcp__super__claude`
+- 🔧 **四工具**: `mcp__super__codex` + `mcp__super__gemini` + `mcp__super__claude` + `mcp__super__broadcast`
 - 📋 **三种模式**: prompt 转发 / git diff review / 文件列表 review
 - 🔄 **会话续接**: 通过 `session_id` 延续上下文
 - 🎯 **模型选择**: 支持指定模型和推理深度
 - ⚡ **纯异步**: 基于 `asyncio.create_subprocess_exec`，无线程
 - 🔒 **安全**: 路径遍历防护、git ref 校验、无 shell 注入
 
-## 📦 安装
+## 📦 前置依赖
+
+- Python >= 3.12
+- [uv](https://docs.astral.sh/uv/)
+- 至少安装以下 CLI 之一（未安装的会在调用时返回错误，不影响其他工具）：
+  - [Codex CLI](https://github.com/openai/codex) — `npm install -g @openai/codex`
+  - [Gemini CLI](https://github.com/google-gemini/gemini-cli) — `npm install -g @google/gemini-cli`
+  - [Claude Code](https://github.com/anthropics/claude-code) — `curl -fsSL https://claude.ai/install.sh | bash` 或 `brew install --cask claude-code`
+
+## 🔌 安装与配置
+
+### Claude Code
 
 ```bash
-# 需要 Python >= 3.12 和 uv
-uv sync
+# 从 Git 直接安装（推荐）
+claude mcp add super -s user --transport stdio -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.git superai-mcp
+
+# 或 clone 后本地安装
+git clone https://github.com/babywbx/SuperAI-MCP.git
+claude mcp add super -s user --transport stdio -- uv run --directory /path/to/SuperAI-MCP superai-mcp
 ```
 
-## 🔌 配置 Claude Code
+<details>
+<summary>手动编辑配置文件</summary>
 
-在 `.mcp.json` 中添加:
+在 `~/.claude/mcp.json`（全局）或 `.mcp.json`（项目级）中添加：
 
 ```json
 {
   "mcpServers": {
     "super": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/SuperAI-MCP", "superai-mcp"]
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/babywbx/SuperAI-MCP.git", "superai-mcp"]
     }
   }
 }
 ```
+
+</details>
+
+<details>
+<summary>可选：自动允许工具调用（免去每次确认）</summary>
+
+在 `~/.claude/settings.json` 中添加：
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "mcp__super"
+    ]
+  }
+}
+```
+
+也可以只允许特定工具：`"mcp__super__codex"`、`"mcp__super__gemini"`、`"mcp__super__claude"`、`"mcp__super__broadcast"`。
+
+</details>
+
+### Codex CLI
+
+在 `~/.codex/config.toml` 中添加：
+
+```toml
+[mcp_servers.super]
+command = "uvx"
+args = ["--from", "git+https://github.com/babywbx/SuperAI-MCP.git", "superai-mcp"]
+```
+
+### Gemini CLI
+
+```bash
+gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.git superai-mcp
+```
+
+<details>
+<summary>手动编辑配置文件</summary>
+
+在 `~/.gemini/settings.json` 中添加：
+
+```json
+{
+  "mcpServers": {
+    "super": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/babywbx/SuperAI-MCP.git", "superai-mcp"]
+    }
+  }
+}
+```
+
+</details>
+
+配置后重启对应 CLI 即可使用。
 
 ## 🛠️ 工具参数
 
@@ -83,6 +156,21 @@ uv sync
 | `return_all_messages` | bool | `False` | 返回完整 JSON |
 | `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
 
+### `broadcast`
+
+将同一 prompt 并发发送给多个 CLI，聚合返回结果。适用于对比不同 AI 的回答。
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `prompt` | str | 必填 | 任务指令 |
+| `cd` | str | 必填 | 工作目录 |
+| `targets` | list[str] | `None` | 目标 CLI 列表，空=全部 (`codex`, `gemini`, `claude`) |
+| `model` | str | `""` | 传给各 CLI 的模型名 |
+| `review_uncommitted` | bool | `False` | 审查未提交更改 |
+| `review_base` | str | `""` | 审查相对于某分支的更改 |
+| `files` | list[str] | `None` | 文件列表模式 |
+| `return_all_messages` | bool | `False` | 返回完整事件流 |
+
 ## 🚦 使用模式
 
 ```
@@ -99,4 +187,4 @@ uv run pytest -v
 
 ## 📄 许可
 
-MIT
+MIT License © 2026 [Babywbx](https://github.com/babywbx)

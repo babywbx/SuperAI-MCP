@@ -1,6 +1,7 @@
-"""FastMCP server with Codex, Gemini, and Claude tool registration."""
+"""FastMCP server with Codex, Gemini, Claude, and broadcast tool registration."""
 
 import asyncio
+import json
 import os
 import shutil
 
@@ -386,6 +387,92 @@ async def claude_tool(
         return _err(str(e))
     except Exception:
         return _err("claude internal error")
+
+
+_ALL_TARGETS = ("codex", "gemini", "claude")
+
+_TARGET_FNS = {
+    "codex": codex_tool,
+    "gemini": gemini_tool,
+    "claude": claude_tool,
+}
+
+
+@mcp.tool(name="broadcast")
+async def broadcast_tool(
+    prompt: str,
+    cd: str,
+    targets: list[str] | None = None,
+    model: str = "",
+    review_uncommitted: bool = False,
+    review_base: str = "",
+    files: list[str] | None = None,
+    return_all_messages: bool = False,
+) -> str:
+    """Broadcast the same prompt to multiple CLI tools in parallel.
+
+    Sends the prompt concurrently to the specified targets (or all if empty)
+    and returns aggregated results. Useful for comparing answers across models.
+    """
+    effective_targets = list(_ALL_TARGETS) if not targets else targets
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for t in effective_targets:
+        if t not in seen:
+            seen.add(t)
+            deduped.append(t)
+    effective_targets = deduped
+
+    # Validate targets
+    invalid = [t for t in effective_targets if t not in _ALL_TARGETS]
+    if invalid:
+        return _err(f"invalid target(s): {', '.join(invalid)}. valid: {', '.join(_ALL_TARGETS)}")
+
+    # Pre-build context once to avoid repeated git diff / file reads
+    try:
+        validate_cd(cd)
+        effective_prompt = await _build_context(
+            prompt, cd=cd,
+            review_uncommitted=review_uncommitted,
+            review_base=review_base,
+            files=files,
+        )
+    except ValueError as e:
+        return _err(str(e))
+
+    # Forward pre-built prompt; disable review/files so tools don't redo the work
+    kwargs: dict[str, object] = {
+        "prompt": effective_prompt,
+        "cd": cd,
+        "model": model,
+        "review_uncommitted": False,
+        "review_base": "",
+        "files": None,
+        "return_all_messages": return_all_messages,
+    }
+
+    async def _call(target: str) -> tuple[str, object]:
+        fn = _TARGET_FNS[target]
+        try:
+            raw = await fn(**kwargs)  # type: ignore[arg-type]
+            return target, json.loads(raw)
+        except Exception as exc:
+            return target, {"success": False, "content": f"{target} error: {exc}"}
+
+    tasks = [_call(t) for t in effective_targets]
+    pairs = await asyncio.gather(*tasks, return_exceptions=True)
+
+    results: dict[str, object] = {}
+    for pair in pairs:
+        if isinstance(pair, BaseException):
+            results["unknown"] = {"success": False, "content": str(pair)}
+        else:
+            target, data = pair
+            results[target] = data
+
+    return json.dumps({"success": True, "results": results})
 
 
 def serve() -> None:
