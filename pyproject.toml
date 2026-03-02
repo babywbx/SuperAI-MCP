@@ -1,6 +1,6 @@
 [project]
 name = "superai-mcp"
-version = "0.1.0"
+version = "1.0.0"
 description = "MCP server wrapping Gemini CLI, Codex CLI & Claude CLI as tools for Claude Code"
 readme = "README.md"
 authors = [
