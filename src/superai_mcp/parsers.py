@@ -176,6 +176,28 @@ def parse_claude_output(
     )
 
 
+_RATE_LIMIT_PATTERNS = (
+    "RESOURCE_EXHAUSTED",   # Gemini
+    "overloaded_error",     # Claude
+    "rate_limit",           # Claude / Codex
+    "429",                  # HTTP 429 Too Many Requests
+    "too many requests",    # generic
+    "quota",                # generic
+)
+
+
+def is_rate_limited(result: CLIResult) -> bool:
+    """Check if result indicates a rate limit or quota error."""
+    if result.success:
+        return False
+    lower = result.content.lower()
+    return any(p.lower() in lower for p in _RATE_LIMIT_PATTERNS)
+
+
+# Backward-compatible alias
+is_quota_exhausted = is_rate_limited
+
+
 def parse_gemini_output(
     lines: list[str],
     *,

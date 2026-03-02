@@ -5,15 +5,24 @@ import json
 import os
 import shutil
 
-from mcp.server.fastmcp import FastMCP
+from collections.abc import Awaitable, Callable
+
+from mcp.server.fastmcp import Context, FastMCP
+from mcp.types import ToolAnnotations
 
 from superai_mcp.git_utils import get_git_diff, read_files
 from superai_mcp.models import CLIResult, Sandbox
-from superai_mcp.parsers import parse_claude_output, parse_codex_output, parse_gemini_output
+from superai_mcp.parsers import (
+    is_rate_limited,
+    parse_claude_output,
+    parse_codex_output,
+    parse_gemini_output,
+)
 from superai_mcp.runner import run_cli
 from superai_mcp.splitter import run_auto_split
 from superai_mcp.validate import (
     validate_cd,
+    validate_commit_sha,
     validate_effort,
     validate_files,
     validate_max_budget,
@@ -28,6 +37,14 @@ mcp = FastMCP("super")
 # Max stderr chars to include in error responses
 _MAX_STDERR = 500
 
+# Fallback chains for rate-limit cascade degradation
+_CLAUDE_FALLBACK_CHAIN = ("sonnet", "haiku")
+_CODEX_EFFORT_CHAIN = ("high", "medium", "low")
+
+# Short probe prompt to verify a fallback model/config is reachable
+_PROBE_PROMPT = "reply ok"
+_PROBE_TIMEOUT = 30.0
+
 
 def _err(msg: str) -> str:
     """Return a JSON error response."""
@@ -40,21 +57,44 @@ def _safe_stderr(stderr: str) -> str:
     return s[:_MAX_STDERR] if len(s) > _MAX_STDERR else s
 
 
+def _make_progress_cb(
+    ctx: Context | None,
+    tool_name: str,
+    timeout: float,
+) -> Callable[[int], Awaitable[None]] | None:
+    """Build an on_progress callback for run_cli, or None if ctx is unavailable."""
+    if ctx is None:
+        return None
+
+    async def _cb(elapsed: int) -> None:
+        await ctx.report_progress(float(elapsed), timeout, f"{tool_name} running ({elapsed}s)")
+
+    return _cb
+
+
 async def _build_context(
     prompt: str,
     *,
     cd: str,
     review_uncommitted: bool,
     review_base: str,
+    review_commit: str = "",
     files: list[str] | None,
 ) -> str:
     """Build prompt with optional diff/file context."""
     parts: list[str] = []
 
-    if review_uncommitted or review_base:
-        diff_text = await get_git_diff(cd, uncommitted=review_uncommitted, base=review_base)
+    if review_uncommitted or review_base or review_commit:
+        diff_text = await get_git_diff(
+            cd, uncommitted=review_uncommitted, base=review_base, commit=review_commit,
+        )
         if diff_text:
-            label = "uncommitted changes" if review_uncommitted else f"changes vs {review_base}"
+            if review_uncommitted:
+                label = "uncommitted changes"
+            elif review_base:
+                label = f"changes vs {review_base}"
+            else:
+                label = f"commit {review_commit}"
             parts.append(f"Below is the git diff ({label}):\n\n```diff\n{diff_text}\n```")
 
     if files:
@@ -64,16 +104,20 @@ async def _build_context(
     return "\n\n".join(parts)
 
 
-@mcp.tool(name="codex")
+@mcp.tool(name="codex", annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False,
+))
 async def codex_tool(
     prompt: str,
     cd: str,
+    ctx: Context | None = None,
     session_id: str = "",
     sandbox: str = Sandbox.READ_ONLY,
     model: str = "",
     reasoning_effort: str = "",
     review_uncommitted: bool = False,
     review_base: str = "",
+    review_commit: str = "",
     files: list[str] | None = None,
     return_all_messages: bool = False,
     auto_split: bool = False,
@@ -96,6 +140,7 @@ async def codex_tool(
         validate_session_id(session_id)
         validate_model(model)
         validate_reasoning_effort(reasoning_effort)
+        validate_commit_sha(review_commit)
         validate_files(files)
 
         if auto_split and session_id:
@@ -112,6 +157,7 @@ async def codex_tool(
             prompt, cd=cd,
             review_uncommitted=review_uncommitted,
             review_base=review_base,
+            review_commit=review_commit,
             files=files,
         )
 
@@ -128,7 +174,10 @@ async def codex_tool(
                 if reasoning_effort:
                     a.extend(["-c", f"model_reasoning_effort={reasoning_effort}"])
                 a.extend(["--", p])
-                r = await run_cli("codex", a, cwd=cd, timeout=timeout)
+                r = await run_cli(
+                    "codex", a, cwd=cd, timeout=timeout,
+                    on_progress=_make_progress_cb(ctx, "codex", timeout),
+                )
                 return parse_codex_output(r.stdout_lines)
 
             async def _resume(p: str, sid: str, timeout: float) -> CLIResult:
@@ -138,7 +187,10 @@ async def codex_tool(
                 if reasoning_effort:
                     a.extend(["-c", f"model_reasoning_effort={reasoning_effort}"])
                 a.extend(["--", sid, p])
-                r = await run_cli("codex", a, cwd=cd, timeout=timeout)
+                r = await run_cli(
+                    "codex", a, cwd=cd, timeout=timeout,
+                    on_progress=_make_progress_cb(ctx, "codex", timeout),
+                )
                 return parse_codex_output(r.stdout_lines)
 
             parsed = await run_auto_split(
@@ -167,10 +219,64 @@ async def codex_tool(
                 args.extend(["-c", f"model_reasoning_effort={reasoning_effort}"])
             args.extend(["--", effective_prompt])
 
-        result = await run_cli("codex", args, cwd=cd)
+        progress_cb = _make_progress_cb(ctx, "codex", 300.0)
+        result = await run_cli("codex", args, cwd=cd, on_progress=progress_cb)
         parsed = parse_codex_output(result.stdout_lines, return_all=return_all_messages)
 
-        if result.returncode != 0 and not parsed.success:
+        # Cascade fallback on rate limit: degrade reasoning_effort high → medium → low
+        if is_rate_limited(parsed) and not session_id:
+            effective_effort = reasoning_effort or "high"
+            eff_idx = (
+                _CODEX_EFFORT_CHAIN.index(effective_effort)
+                if effective_effort in _CODEX_EFFORT_CHAIN
+                else -1  # unknown effort (e.g. xhigh) → start from high
+            )
+            for next_effort in _CODEX_EFFORT_CHAIN[eff_idx + 1:]:
+                # Probe: short test to verify the effort level is reachable
+                probe_args = [
+                    "exec", "--json",
+                    "--sandbox", validated_sandbox.value,
+                    "--cd", cd,
+                    "--skip-git-repo-check",
+                ]
+                if model:
+                    probe_args.extend(["-m", model])
+                probe_args.extend(["-c", f"model_reasoning_effort={next_effort}"])
+                probe_args.extend(["--", _PROBE_PROMPT])
+                probe_result = await run_cli(
+                    "codex", probe_args, cwd=cd, timeout=_PROBE_TIMEOUT,
+                )
+                probe_parsed = parse_codex_output(probe_result.stdout_lines)
+                if not probe_parsed.success:
+                    if is_rate_limited(probe_parsed):
+                        continue  # this level also rate-limited, try next
+                    break  # different error, stop
+                # Probe OK — send the real prompt
+                retry_args = [
+                    "exec", "--json",
+                    "--sandbox", validated_sandbox.value,
+                    "--cd", cd,
+                    "--skip-git-repo-check",
+                ]
+                if model:
+                    retry_args.extend(["-m", model])
+                retry_args.extend(["-c", f"model_reasoning_effort={next_effort}"])
+                retry_args.extend(["--", effective_prompt])
+                retry_result = await run_cli(
+                    "codex", retry_args, cwd=cd, on_progress=progress_cb,
+                )
+                parsed = parse_codex_output(
+                    retry_result.stdout_lines, return_all=return_all_messages,
+                )
+                if parsed.success:
+                    parsed = parsed.model_copy(update={
+                        "content": f"[fallback: effort={next_effort}] {parsed.content}",
+                    })
+                    break
+                if not is_rate_limited(parsed):
+                    break  # different error, stop
+                # still rate-limited — continue to next tier
+        elif result.returncode != 0 and not parsed.success:
             parsed = parsed.model_copy(update={
                 "content": f"codex exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
             })
@@ -185,15 +291,19 @@ async def codex_tool(
         return _err("codex internal error")
 
 
-@mcp.tool(name="gemini")
+@mcp.tool(name="gemini", annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False,
+))
 async def gemini_tool(
     prompt: str,
     cd: str,
+    ctx: Context | None = None,
     session_id: str = "",
     sandbox: bool = True,
     model: str = "",
     review_uncommitted: bool = False,
     review_base: str = "",
+    review_commit: str = "",
     files: list[str] | None = None,
     return_all_messages: bool = False,
     auto_split: bool = False,
@@ -214,6 +324,7 @@ async def gemini_tool(
         validate_cd(cd)
         validate_session_id(session_id)
         validate_model(model)
+        validate_commit_sha(review_commit)
         validate_files(files)
 
         if auto_split and session_id:
@@ -223,6 +334,7 @@ async def gemini_tool(
             prompt, cd=cd,
             review_uncommitted=review_uncommitted,
             review_base=review_base,
+            review_commit=review_commit,
             files=files,
         )
 
@@ -239,7 +351,10 @@ async def gemini_tool(
                     a.append("--sandbox")
                 if model:
                     a.extend(["--model", model])
-                r = await run_cli("gemini", a, cwd=cd, timeout=timeout)
+                r = await run_cli(
+                    "gemini", a, cwd=cd, timeout=timeout,
+                    on_progress=_make_progress_cb(ctx, "gemini", timeout),
+                )
                 return parse_gemini_output(r.stdout_lines)
 
             async def _resume(p: str, sid: str, timeout: float) -> CLIResult:
@@ -248,7 +363,10 @@ async def gemini_tool(
                     a.append("--sandbox")
                 if model:
                     a.extend(["--model", model])
-                r = await run_cli("gemini", a, cwd=cd, timeout=timeout)
+                r = await run_cli(
+                    "gemini", a, cwd=cd, timeout=timeout,
+                    on_progress=_make_progress_cb(ctx, "gemini", timeout),
+                )
                 return parse_gemini_output(r.stdout_lines)
 
             parsed = await run_auto_split(
@@ -264,10 +382,25 @@ async def gemini_tool(
         if session_id:
             args.extend(["--resume", session_id])
 
-        result = await run_cli("gemini", args, cwd=cd)
+        progress_cb = _make_progress_cb(ctx, "gemini", 300.0)
+        result = await run_cli("gemini", args, cwd=cd, on_progress=progress_cb)
         parsed = parse_gemini_output(result.stdout_lines, return_all=return_all_messages)
 
-        if result.returncode != 0 and not parsed.success:
+        # Quota fallback: retry once with flash model (check before overwriting content)
+        if is_rate_limited(parsed) and model != "flash":
+            retry_args = ["-p", effective_prompt, "-o", "stream-json"]
+            if sandbox:
+                retry_args.append("--sandbox")
+            retry_args.extend(["--model", "flash"])
+            if session_id:
+                retry_args.extend(["--resume", session_id])
+            retry_result = await run_cli("gemini", retry_args, cwd=cd, on_progress=progress_cb)
+            parsed = parse_gemini_output(retry_result.stdout_lines, return_all=return_all_messages)
+            if parsed.success:
+                parsed = parsed.model_copy(update={
+                    "content": f"[fallback: flash] {parsed.content}",
+                })
+        elif result.returncode != 0 and not parsed.success:
             parsed = parsed.model_copy(update={
                 "content": f"gemini exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
             })
@@ -289,10 +422,13 @@ def _claude_env() -> dict[str, str]:
     return env
 
 
-@mcp.tool(name="claude")
+@mcp.tool(name="claude", annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False,
+))
 async def claude_tool(
     prompt: str,
     cd: str,
+    ctx: Context | None = None,
     session_id: str = "",
     sandbox: str = Sandbox.READ_ONLY,
     model: str = "",
@@ -300,6 +436,7 @@ async def claude_tool(
     max_budget_usd: float = 0.0,
     review_uncommitted: bool = False,
     review_base: str = "",
+    review_commit: str = "",
     files: list[str] | None = None,
     return_all_messages: bool = False,
     auto_split: bool = False,
@@ -323,6 +460,7 @@ async def claude_tool(
         validate_model(model)
         validate_effort(effort)
         validate_max_budget(max_budget_usd)
+        validate_commit_sha(review_commit)
         validate_files(files)
 
         if auto_split and session_id:
@@ -332,6 +470,7 @@ async def claude_tool(
             prompt, cd=cd,
             review_uncommitted=review_uncommitted,
             review_base=review_base,
+            review_commit=review_commit,
             files=files,
         )
 
@@ -357,7 +496,10 @@ async def claude_tool(
                 if effort:
                     a.extend(["--effort", effort])
                 a.extend(sandbox_args)
-                r = await run_cli("claude", a, cwd=cd, env=env, timeout=timeout)
+                r = await run_cli(
+                    "claude", a, cwd=cd, env=env, timeout=timeout,
+                    on_progress=_make_progress_cb(ctx, "claude", timeout),
+                )
                 return parse_claude_output(r.stdout_lines)
 
             async def _resume(p: str, sid: str, timeout: float) -> CLIResult:
@@ -367,7 +509,10 @@ async def claude_tool(
                 if effort:
                     a.extend(["--effort", effort])
                 a.extend(sandbox_args)
-                r = await run_cli("claude", a, cwd=cd, env=env, timeout=timeout)
+                r = await run_cli(
+                    "claude", a, cwd=cd, env=env, timeout=timeout,
+                    on_progress=_make_progress_cb(ctx, "claude", timeout),
+                )
                 return parse_claude_output(r.stdout_lines)
 
             parsed = await run_auto_split(
@@ -387,10 +532,57 @@ async def claude_tool(
             args.extend(["--max-budget-usd", str(max_budget_usd)])
         args.extend(sandbox_args)
 
-        result = await run_cli("claude", args, cwd=cd, env=_claude_env())
+        env = _claude_env()
+        progress_cb = _make_progress_cb(ctx, "claude", 300.0)
+        result = await run_cli(
+            "claude", args, cwd=cd, env=env, on_progress=progress_cb,
+        )
         parsed = parse_claude_output(result.stdout_lines, return_all=return_all_messages)
 
-        if result.returncode != 0 and not parsed.success:
+        # Cascade fallback on rate limit: current → sonnet → haiku
+        if is_rate_limited(parsed):
+            # Only try models strictly below the current model in the chain
+            start = 0
+            for i, m in enumerate(_CLAUDE_FALLBACK_CHAIN):
+                if model == m:
+                    start = i + 1
+                    break
+            for fallback_model in _CLAUDE_FALLBACK_CHAIN[start:]:
+                # Probe: short test to verify fallback model is reachable
+                probe_args = ["-p", _PROBE_PROMPT, "--output-format", "json",
+                              "--model", fallback_model]
+                probe_args.extend(sandbox_args)
+                probe_result = await run_cli(
+                    "claude", probe_args, cwd=cd, env=env, timeout=_PROBE_TIMEOUT,
+                )
+                probe_parsed = parse_claude_output(probe_result.stdout_lines)
+                if not probe_parsed.success:
+                    if is_rate_limited(probe_parsed):
+                        continue  # this level also rate-limited, try next
+                    break  # different error, stop
+                # Probe OK — send the real prompt
+                retry_args = ["-p", effective_prompt, "--output-format", "json",
+                              "--model", fallback_model]
+                if effort:
+                    retry_args.extend(["--effort", effort])
+                if max_budget_usd > 0:
+                    retry_args.extend(["--max-budget-usd", str(max_budget_usd)])
+                retry_args.extend(sandbox_args)
+                retry_result = await run_cli(
+                    "claude", retry_args, cwd=cd, env=env, on_progress=progress_cb,
+                )
+                parsed = parse_claude_output(
+                    retry_result.stdout_lines, return_all=return_all_messages,
+                )
+                if parsed.success:
+                    parsed = parsed.model_copy(update={
+                        "content": f"[fallback: {fallback_model}] {parsed.content}",
+                    })
+                    break
+                if not is_rate_limited(parsed):
+                    break  # different error, stop
+                # still rate-limited — continue to next tier
+        elif result.returncode != 0 and not parsed.success:
             parsed = parsed.model_copy(update={
                 "content": f"claude exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
             })
@@ -414,14 +606,18 @@ _TARGET_FNS = {
 }
 
 
-@mcp.tool(name="broadcast")
+@mcp.tool(name="broadcast", annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False,
+))
 async def broadcast_tool(
     prompt: str,
     cd: str,
+    ctx: Context | None = None,
     targets: list[str] | None = None,
     model: str = "",
     review_uncommitted: bool = False,
     review_base: str = "",
+    review_commit: str = "",
     files: list[str] | None = None,
     return_all_messages: bool = False,
 ) -> str:
@@ -449,10 +645,12 @@ async def broadcast_tool(
     # Pre-build context once to avoid repeated git diff / file reads
     try:
         validate_cd(cd)
+        validate_commit_sha(review_commit)
         effective_prompt = await _build_context(
             prompt, cd=cd,
             review_uncommitted=review_uncommitted,
             review_base=review_base,
+            review_commit=review_commit,
             files=files,
         )
     except ValueError as e:
@@ -465,6 +663,7 @@ async def broadcast_tool(
         "model": model,
         "review_uncommitted": False,
         "review_base": "",
+        "review_commit": "",
         "files": None,
         "return_all_messages": return_all_messages,
     }

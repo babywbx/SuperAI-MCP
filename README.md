@@ -5,11 +5,14 @@
 ## ✨ 特性
 
 - 🔧 **四工具**: `mcp__super__codex` + `mcp__super__gemini` + `mcp__super__claude` + `mcp__super__broadcast`
-- 📋 **三种模式**: prompt 转发 / git diff review / 文件列表 review
+- 📋 **四种模式**: prompt 转发 / git diff review / 文件列表 review / commit 审查
 - 🔄 **会话续接**: 通过 `session_id` 延续上下文
 - 🎯 **模型选择**: 支持指定模型和推理深度
 - ⚡ **纯异步**: 基于 `asyncio.create_subprocess_exec`，无线程
 - 🔒 **安全**: 路径遍历防护、git ref 校验、无 shell 注入
+- 📡 **进度通知**: 长时间任务每 25s 发送 `report_progress` keepalive
+- 🔄 **配额回退**: 限流时自动级联降级（Gemini→flash / Claude→sonnet→haiku / Codex effort 降级）
+- 🏷️ **工具注解**: 每个工具附带 `ToolAnnotations` 元数据
 
 ## 📦 前置依赖
 
@@ -120,6 +123,7 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `reasoning_effort` | str | `""` | 推理深度: low/medium/high/xhigh |
 | `review_uncommitted` | bool | `False` | 审查未提交更改 |
 | `review_base` | str | `""` | 审查相对于某分支的更改 |
+| `review_commit` | str | `""` | 审查特定 commit (7-40 位 hex SHA) |
 | `files` | list[str] | `None` | 文件列表模式 |
 | `return_all_messages` | bool | `False` | 返回完整事件流 |
 | `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
@@ -135,6 +139,7 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `model` | str | `""` | 模型名/别名 (pro, flash 等) |
 | `review_uncommitted` | bool | `False` | 审查未提交更改 |
 | `review_base` | str | `""` | 审查相对于某分支的更改 |
+| `review_commit` | str | `""` | 审查特定 commit (7-40 位 hex SHA) |
 | `files` | list[str] | `None` | 文件列表模式 |
 | `return_all_messages` | bool | `False` | 返回完整事件流 |
 | `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
@@ -152,6 +157,7 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `max_budget_usd` | float | `0.0` | API 费用上限 (0=不限) |
 | `review_uncommitted` | bool | `False` | 审查未提交更改 |
 | `review_base` | str | `""` | 审查相对于某分支的更改 |
+| `review_commit` | str | `""` | 审查特定 commit (7-40 位 hex SHA) |
 | `files` | list[str] | `None` | 文件列表模式 |
 | `return_all_messages` | bool | `False` | 返回完整 JSON |
 | `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
@@ -168,6 +174,7 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `model` | str | `""` | 传给各 CLI 的模型名 |
 | `review_uncommitted` | bool | `False` | 审查未提交更改 |
 | `review_base` | str | `""` | 审查相对于某分支的更改 |
+| `review_commit` | str | `""` | 审查特定 commit (7-40 位 hex SHA) |
 | `files` | list[str] | `None` | 文件列表模式 |
 | `return_all_messages` | bool | `False` | 返回完整事件流 |
 
@@ -175,9 +182,27 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 
 ```
 1️⃣ 默认模式 — prompt 直接转发给 CLI
-2️⃣ Review 模式 — 自动获取 git diff 注入 prompt
+2️⃣ Review 模式 — 自动获取 git diff 注入 prompt (uncommitted / base / commit)
 3️⃣ 文件模式 — 读取文件内容注入 prompt
 ```
+
+## 🔄 配额/限流回退
+
+当 CLI 返回限流错误（`RESOURCE_EXHAUSTED`、`overloaded_error`、`429`、`rate_limit`、`quota` 等）时，会自动级联降级重试。降级前先发一个短探测请求验证目标可用。
+
+| CLI | 回退策略 | 示例 |
+|-----|---------|------|
+| **Gemini** | 切换为 `flash` 模型 | `pro` → `flash` |
+| **Claude** | 按模型降级 | 当前模型 → `sonnet` → `haiku` |
+| **Codex** | 降低推理深度 | `high` → `medium` → `low` |
+
+成功时响应内容以 `[fallback: ...]` 前缀标注（如 `[fallback: sonnet]`、`[fallback: effort=medium]`）。
+如果已处于链末端（Gemini 已用 `flash`、Claude 已用 `haiku`、Codex 已用 `low`），不会重试。
+
+## 📡 进度通知
+
+CLI 执行期间每 25 秒通过 MCP `report_progress` 发送一次心跳通知，包含已运行时间。
+防止长时间任务时客户端误判超时断开连接。
 
 ## 🧪 测试
 

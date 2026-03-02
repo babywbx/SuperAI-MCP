@@ -1,6 +1,13 @@
 """Tests for Codex and Gemini output parsers."""
 
-from superai_mcp.parsers import parse_claude_output, parse_codex_output, parse_gemini_output
+from superai_mcp.parsers import (
+    is_quota_exhausted,
+    is_rate_limited,
+    parse_claude_output,
+    parse_codex_output,
+    parse_gemini_output,
+)
+from superai_mcp.models import CLIResult
 
 # -- Real CLI output fixtures --
 
@@ -188,6 +195,53 @@ class TestCodexParser:
         r = parse_codex_output(lines)
         assert r.success is True
         assert r.content == "Hello"
+
+
+class TestIsRateLimited:
+    def test_gemini_resource_exhausted(self) -> None:
+        r = CLIResult(success=False, content="Error: RESOURCE_EXHAUSTED quota exceeded")
+        assert is_rate_limited(r) is True
+
+    def test_claude_overloaded(self) -> None:
+        r = CLIResult(success=False, content="overloaded_error: model is overloaded")
+        assert is_rate_limited(r) is True
+
+    def test_http_429(self) -> None:
+        r = CLIResult(success=False, content="429 Too Many Requests")
+        assert is_rate_limited(r) is True
+
+    def test_rate_limit_keyword(self) -> None:
+        r = CLIResult(success=False, content="rate_limit_exceeded")
+        assert is_rate_limited(r) is True
+
+    def test_too_many_requests(self) -> None:
+        r = CLIResult(success=False, content="Error: too many requests, please retry")
+        assert is_rate_limited(r) is True
+
+    def test_quota_keyword(self) -> None:
+        r = CLIResult(success=False, content="API quota exceeded for this project")
+        assert is_rate_limited(r) is True
+
+    def test_success_result_not_detected(self) -> None:
+        r = CLIResult(success=True, content="RESOURCE_EXHAUSTED")
+        assert is_rate_limited(r) is False
+
+    def test_other_error_not_detected(self) -> None:
+        r = CLIResult(success=False, content="401 Unauthorized")
+        assert is_rate_limited(r) is False
+
+    def test_empty_content(self) -> None:
+        r = CLIResult(success=False, content="")
+        assert is_rate_limited(r) is False
+
+    def test_case_insensitive(self) -> None:
+        r = CLIResult(success=False, content="resource_exhausted")
+        assert is_rate_limited(r) is True
+
+    def test_backward_compat_alias(self) -> None:
+        r = CLIResult(success=False, content="RESOURCE_EXHAUSTED")
+        assert is_quota_exhausted(r) is True
+        assert is_quota_exhausted is is_rate_limited
 
 
 class TestGeminiParser:
