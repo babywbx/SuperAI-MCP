@@ -4,11 +4,12 @@
 
 ## ✨ 特性
 
-- 🔧 **四工具**: `mcp__super__codex` + `mcp__super__gemini` + `mcp__super__claude` + `mcp__super__broadcast`
+- 🔧 **五工具**: `codex` + `gemini` + `claude` + `broadcast` + `list-models`
 - 📋 **四种模式**: prompt 转发 / git diff review / 文件列表 review / commit 审查
 - 🔄 **会话续接**: 通过 `session_id` 延续上下文
 - 🎯 **模型选择**: 支持指定模型和推理深度
 - ⚡ **纯异步**: 基于 `asyncio.create_subprocess_exec`，无线程
+- 🔍 **模型发现**: `list-models` 实时查询可用模型，`model` 参数自动校验+纠错建议
 - 🔒 **安全**: 路径遍历防护、git ref 校验、无 shell 注入
 - 📡 **进度通知**: 长时间任务每 25s 发送 `report_progress` keepalive
 - 🔄 **配额回退**: 限流时自动级联降级（Gemini→flash / Claude→sonnet→haiku / Codex effort 降级）
@@ -69,7 +70,7 @@ claude mcp add super -s user --transport stdio -- uv run --directory /path/to/Su
 }
 ```
 
-也可以只允许特定工具：`"mcp__super__codex"`、`"mcp__super__gemini"`、`"mcp__super__claude"`、`"mcp__super__broadcast"`。
+也可以只允许特定工具：`"mcp__super__codex"`、`"mcp__super__gemini"`、`"mcp__super__claude"`、`"mcp__super__broadcast"`、`"mcp__super__list-models"`。
 
 </details>
 
@@ -177,6 +178,33 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `review_commit` | str | `""` | 审查特定 commit (7-40 位 hex SHA) |
 | `files` | list[str] | `None` | 文件列表模式 |
 | `return_all_messages` | bool | `False` | 返回完整事件流 |
+
+### `list-models`
+
+查询 OpenRouter 上三家（OpenAI、Google、Anthropic）的可用模型列表。无需 API key，结果缓存 5 分钟。
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `provider` | str | `""` | 按厂商过滤: `openai`、`google`、`anthropic`，空=三家全部 |
+
+返回的 `model_id` 字段可直接作为其他工具的 `model` 参数使用。自动过滤掉 CLI 不兼容的变体（image、customtools、gemma、:free 等）。
+
+> **⚠️ 注意**: 数据来自 OpenRouter，**不保证所有返回的模型都能在对应 CLI 中使用**。这是一个辅助发现功能，实际可用性以各 CLI 为准。截至 2026-03，已验证可用的最新模型：
+>
+> | CLI | 最新可用模型 |
+> |-----|-------------|
+> | Gemini | `gemini-3.1-pro-preview` |
+> | Codex | `gpt-5.3-codex` |
+> | Claude | `claude-opus-4-6` |
+
+## 🔍 模型校验
+
+传入 `model` 参数时，工具会先通过 OpenRouter 缓存校验模型是否存在。这同样是辅助功能——通过校验不代表 CLI 一定支持，但**未通过校验的模型大概率是拼写错误**。
+
+- **模型存在** → 正常执行
+- **模型不存在** → 秒返回错误 + 推荐相似模型名
+- **短别名** (`flash`、`pro`、`sonnet`、`haiku`、`opus`) → 跳过校验，直接走 CLI
+- **OpenRouter 不可达** → 静默跳过校验，不影响主流程
 
 ## 🚦 使用模式
 
