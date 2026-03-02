@@ -4,6 +4,9 @@ import asyncio
 import json
 import os
 import shutil
+import tomllib
+from functools import lru_cache
+from pathlib import Path
 
 from collections.abc import Awaitable, Callable
 
@@ -11,6 +14,7 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
 from superai_mcp.git_utils import get_git_diff, read_files
+from superai_mcp.openrouter import check_model, fetch_models
 from superai_mcp.models import CLIResult, Sandbox
 from superai_mcp.parsers import (
     is_rate_limited,
@@ -45,10 +49,72 @@ _CODEX_EFFORT_CHAIN = ("high", "medium", "low")
 _PROBE_PROMPT = "reply ok"
 _PROBE_TIMEOUT = 30.0
 
+# Model detection probe for CLIs that don't report their model
+_MODEL_PROBE_PROMPT = (
+    'Reply ONLY with a JSON object: {"model": "<your exact model id>"}. '
+    "Nothing else, no markdown."
+)
+_MODEL_PROBE_TIMEOUT = 15.0
+
+
+@lru_cache(maxsize=4)
+def _read_default_model(cli: str) -> str | None:
+    """Read default model name from CLI config file (cached)."""
+    try:
+        if cli == "codex":
+            path = Path.home() / ".codex" / "config.toml"
+            if path.exists():
+                with path.open("rb") as f:
+                    data = tomllib.load(f)
+                val = data.get("model")
+                return str(val) if val else None
+        elif cli == "gemini":
+            path = Path.home() / ".gemini" / "settings.json"
+            if path.exists():
+                with path.open() as f:
+                    data = json.load(f)
+                val = data.get("defaultModel")
+                return str(val) if val else None
+    except Exception:
+        pass
+    return None
+
+
+# Cache for the Claude model probe (None = not probed yet, str = detected)
+_claude_default_model: str | None = None
+_claude_model_probed = False
+
+
+async def _probe_claude_model() -> str | None:
+    """Probe Claude CLI to detect its default model (cached after first call)."""
+    global _claude_default_model, _claude_model_probed  # noqa: PLW0603
+    if _claude_model_probed:
+        return _claude_default_model
+    _claude_model_probed = True
+    try:
+        env = _claude_env()
+        result = await run_cli(
+            "claude",
+            ["-p", _MODEL_PROBE_PROMPT, "--output-format", "json"],
+            cwd="/tmp",
+            env=env,
+            timeout=_MODEL_PROBE_TIMEOUT,
+        )
+        parsed = parse_claude_output(result.stdout_lines)
+        if parsed.success and parsed.content:
+            blob = json.loads(parsed.content.strip())
+            if isinstance(blob, dict):
+                val = blob.get("model")
+                if isinstance(val, str) and val:
+                    _claude_default_model = val
+    except Exception:
+        pass
+    return _claude_default_model
+
 
 def _err(msg: str) -> str:
     """Return a JSON error response."""
-    return CLIResult(success=False, content=msg).model_dump_json()
+    return CLIResult(success=False, content=msg).model_dump_json(exclude_none=True)
 
 
 def _safe_stderr(stderr: str) -> str:
@@ -143,6 +209,10 @@ async def codex_tool(
         validate_commit_sha(review_commit)
         validate_files(files)
 
+        model_err = await check_model(model, "codex")
+        if model_err:
+            return _err(model_err)
+
         if auto_split and session_id:
             return _err("auto_split and session_id are mutually exclusive")
 
@@ -178,7 +248,10 @@ async def codex_tool(
                     "codex", a, cwd=cd, timeout=timeout,
                     on_progress=_make_progress_cb(ctx, "codex", timeout),
                 )
-                return parse_codex_output(r.stdout_lines)
+                parsed = parse_codex_output(r.stdout_lines)
+                if not parsed.model:
+                    parsed = parsed.model_copy(update={"model": model or None})
+                return parsed
 
             async def _resume(p: str, sid: str, timeout: float) -> CLIResult:
                 a = ["exec", "resume", "--json", "--skip-git-repo-check"]
@@ -191,12 +264,15 @@ async def codex_tool(
                     "codex", a, cwd=cd, timeout=timeout,
                     on_progress=_make_progress_cb(ctx, "codex", timeout),
                 )
-                return parse_codex_output(r.stdout_lines)
+                parsed = parse_codex_output(r.stdout_lines)
+                if not parsed.model:
+                    parsed = parsed.model_copy(update={"model": model or None})
+                return parsed
 
             parsed = await run_auto_split(
                 effective_prompt, call_fn=_call, resume_fn=_resume,
             )
-            return parsed.model_dump_json()
+            return parsed.model_dump_json(exclude_none=True)
 
         # Resume mode: pass session_id and prompt as positional args
         if session_id:
@@ -222,6 +298,8 @@ async def codex_tool(
         progress_cb = _make_progress_cb(ctx, "codex", 300.0)
         result = await run_cli("codex", args, cwd=cd, on_progress=progress_cb)
         parsed = parse_codex_output(result.stdout_lines, return_all=return_all_messages)
+        if not parsed.model:
+            parsed = parsed.model_copy(update={"model": model or None})
 
         # Cascade fallback on rate limit: degrade reasoning_effort high → medium → low
         if is_rate_limited(parsed) and not session_id:
@@ -281,7 +359,7 @@ async def codex_tool(
                 "content": f"codex exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
             })
 
-        return parsed.model_dump_json()
+        return parsed.model_dump_json(exclude_none=True)
 
     except asyncio.TimeoutError:
         return _err("codex timed out")
@@ -327,6 +405,10 @@ async def gemini_tool(
         validate_commit_sha(review_commit)
         validate_files(files)
 
+        model_err = await check_model(model, "gemini")
+        if model_err:
+            return _err(model_err)
+
         if auto_split and session_id:
             return _err("auto_split and session_id are mutually exclusive")
 
@@ -355,7 +437,10 @@ async def gemini_tool(
                     "gemini", a, cwd=cd, timeout=timeout,
                     on_progress=_make_progress_cb(ctx, "gemini", timeout),
                 )
-                return parse_gemini_output(r.stdout_lines)
+                parsed = parse_gemini_output(r.stdout_lines)
+                if not parsed.model:
+                    parsed = parsed.model_copy(update={"model": model or None})
+                return parsed
 
             async def _resume(p: str, sid: str, timeout: float) -> CLIResult:
                 a = ["-p", p, "-o", "stream-json", "--resume", sid]
@@ -367,12 +452,15 @@ async def gemini_tool(
                     "gemini", a, cwd=cd, timeout=timeout,
                     on_progress=_make_progress_cb(ctx, "gemini", timeout),
                 )
-                return parse_gemini_output(r.stdout_lines)
+                parsed = parse_gemini_output(r.stdout_lines)
+                if not parsed.model:
+                    parsed = parsed.model_copy(update={"model": model or None})
+                return parsed
 
             parsed = await run_auto_split(
                 effective_prompt, call_fn=_call, resume_fn=_resume,
             )
-            return parsed.model_dump_json()
+            return parsed.model_dump_json(exclude_none=True)
 
         args = ["-p", effective_prompt, "-o", "stream-json"]
         if sandbox:
@@ -385,6 +473,8 @@ async def gemini_tool(
         progress_cb = _make_progress_cb(ctx, "gemini", 300.0)
         result = await run_cli("gemini", args, cwd=cd, on_progress=progress_cb)
         parsed = parse_gemini_output(result.stdout_lines, return_all=return_all_messages)
+        if not parsed.model:
+            parsed = parsed.model_copy(update={"model": model or None})
 
         # Quota fallback: retry once with flash model (check before overwriting content)
         if is_rate_limited(parsed) and model != "flash":
@@ -399,13 +489,14 @@ async def gemini_tool(
             if parsed.success:
                 parsed = parsed.model_copy(update={
                     "content": f"[fallback: flash] {parsed.content}",
+                    "model": parsed.model or "flash",
                 })
         elif result.returncode != 0 and not parsed.success:
             parsed = parsed.model_copy(update={
                 "content": f"gemini exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
             })
 
-        return parsed.model_dump_json()
+        return parsed.model_dump_json(exclude_none=True)
 
     except asyncio.TimeoutError:
         return _err("gemini timed out")
@@ -463,6 +554,10 @@ async def claude_tool(
         validate_commit_sha(review_commit)
         validate_files(files)
 
+        model_err = await check_model(model, "claude")
+        if model_err:
+            return _err(model_err)
+
         if auto_split and session_id:
             return _err("auto_split and session_id are mutually exclusive")
 
@@ -500,7 +595,10 @@ async def claude_tool(
                     "claude", a, cwd=cd, env=env, timeout=timeout,
                     on_progress=_make_progress_cb(ctx, "claude", timeout),
                 )
-                return parse_claude_output(r.stdout_lines)
+                parsed = parse_claude_output(r.stdout_lines)
+                if not parsed.model:
+                    parsed = parsed.model_copy(update={"model": model or None})
+                return parsed
 
             async def _resume(p: str, sid: str, timeout: float) -> CLIResult:
                 a = ["-p", p, "--output-format", "json", "--resume", sid]
@@ -513,12 +611,15 @@ async def claude_tool(
                     "claude", a, cwd=cd, env=env, timeout=timeout,
                     on_progress=_make_progress_cb(ctx, "claude", timeout),
                 )
-                return parse_claude_output(r.stdout_lines)
+                parsed = parse_claude_output(r.stdout_lines)
+                if not parsed.model:
+                    parsed = parsed.model_copy(update={"model": model or None})
+                return parsed
 
             parsed = await run_auto_split(
                 effective_prompt, call_fn=_call, resume_fn=_resume,
             )
-            return parsed.model_dump_json()
+            return parsed.model_dump_json(exclude_none=True)
 
         args = ["-p", effective_prompt, "--output-format", "json"]
 
@@ -538,6 +639,8 @@ async def claude_tool(
             "claude", args, cwd=cd, env=env, on_progress=progress_cb,
         )
         parsed = parse_claude_output(result.stdout_lines, return_all=return_all_messages)
+        if not parsed.model:
+            parsed = parsed.model_copy(update={"model": model or None})
 
         # Cascade fallback on rate limit: current → sonnet → haiku
         if is_rate_limited(parsed):
@@ -577,6 +680,7 @@ async def claude_tool(
                 if parsed.success:
                     parsed = parsed.model_copy(update={
                         "content": f"[fallback: {fallback_model}] {parsed.content}",
+                        "model": parsed.model or fallback_model,
                     })
                     break
                 if not is_rate_limited(parsed):
@@ -587,7 +691,7 @@ async def claude_tool(
                 "content": f"claude exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
             })
 
-        return parsed.model_dump_json()
+        return parsed.model_dump_json(exclude_none=True)
 
     except asyncio.TimeoutError:
         return _err("claude timed out")
@@ -688,6 +792,23 @@ async def broadcast_tool(
             results[target] = data
 
     return json.dumps({"success": True, "results": results})
+
+
+@mcp.tool(name="list-models", annotations=ToolAnnotations(
+    readOnlyHint=True, destructiveHint=False, idempotentHint=True,
+))
+async def list_models_tool(
+    provider: str = "",
+) -> str:
+    """List available models from OpenRouter (covers OpenAI, Google, Anthropic).
+
+    Filter by provider prefix: "openai", "google", "anthropic", or empty for all three.
+    """
+    try:
+        models = await fetch_models(provider)
+        return json.dumps({"success": True, "count": len(models), "models": models})
+    except Exception as exc:
+        return _err(f"Failed to fetch models: {exc}")
 
 
 def serve() -> None:

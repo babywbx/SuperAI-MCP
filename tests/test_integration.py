@@ -10,7 +10,7 @@ import shutil
 
 import pytest
 
-from superai_mcp.server import broadcast_tool, claude_tool, codex_tool, gemini_tool
+from superai_mcp.server import broadcast_tool, claude_tool, codex_tool, gemini_tool, list_models_tool
 
 pytestmark = pytest.mark.integration
 
@@ -258,3 +258,26 @@ class TestParallel:
         assert len(cr["content"]) > 0
         assert len(gr["content"]) > 0
         assert len(clr["content"]) > 0
+
+
+# -- list-models tests --
+
+
+class TestListModelsIntegration:
+    async def test_list_all_providers(self) -> None:
+        """Fetch models for all three default providers."""
+        raw = await list_models_tool()
+        result = json.loads(raw)
+        assert result["success"] is True
+        assert result["count"] > 0
+        # Should have models from at least two providers
+        prefixes = {m["id"].split("/")[0] for m in result["models"]}
+        assert len(prefixes & {"anthropic", "google", "openai"}) >= 2
+
+    async def test_list_single_provider(self) -> None:
+        """Fetch models for a single provider."""
+        raw = await list_models_tool(provider="anthropic")
+        result = json.loads(raw)
+        assert result["success"] is True
+        assert result["count"] > 0
+        assert all(m["id"].startswith("anthropic/") for m in result["models"])
