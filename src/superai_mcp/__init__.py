@@ -1,4 +1,4 @@
-"""SuperAI MCP — Gemini CLI & Codex CLI as MCP tools."""
+"""SuperAI MCP — Gemini CLI, Codex CLI & Claude CLI as MCP tools."""
 
 __version__ = "0.1.0"
 

@@ -6,7 +6,9 @@ import pytest
 
 from superai_mcp.validate import (
     validate_cd,
+    validate_effort,
     validate_files,
+    validate_max_budget,
     validate_model,
     validate_reasoning_effort,
     validate_sandbox,
@@ -97,6 +99,33 @@ class TestValidateReasoningEffort:
     def test_injection(self) -> None:
         with pytest.raises(ValueError, match="invalid reasoning_effort"):
             validate_reasoning_effort("high other_setting=evil")
+
+
+class TestValidateEffort:
+    def test_valid_values(self) -> None:
+        for v in ("low", "medium", "high"):
+            assert validate_effort(v) == v
+
+    def test_empty_ok(self) -> None:
+        assert validate_effort("") == ""
+
+    def test_invalid(self) -> None:
+        with pytest.raises(ValueError, match="invalid effort"):
+            validate_effort("xhigh")
+
+    def test_injection(self) -> None:
+        with pytest.raises(ValueError, match="invalid effort"):
+            validate_effort("high --evil")
+
+
+class TestValidateMaxBudget:
+    def test_valid_values(self) -> None:
+        assert validate_max_budget(0.0) == 0.0
+        assert validate_max_budget(5.5) == 5.5
+
+    def test_negative(self) -> None:
+        with pytest.raises(ValueError, match="invalid max_budget_usd"):
+            validate_max_budget(-1.0)
 
 
 class TestValidateFiles:

@@ -1,6 +1,6 @@
 """Tests for Codex and Gemini output parsers."""
 
-from superai_mcp.parsers import parse_codex_output, parse_gemini_output
+from superai_mcp.parsers import parse_claude_output, parse_codex_output, parse_gemini_output
 
 # -- Real CLI output fixtures --
 
@@ -19,6 +19,90 @@ GEMINI_LINES = [
     '{"type":"message","role":"assistant","content":" there!","delta":true}',
     '{"type":"result","status":"success","stats":{"input_tokens":50,"output_tokens":5}}',
 ]
+
+
+CLAUDE_LINES = [
+    '{"session_id":"claude-789","usage":{"input_tokens":200,"output_tokens":20},"result":"Hello from Claude"}',
+]
+
+CLAUDE_MULTILINE = [
+    '{',
+    '  "session_id": "claude-multi",',
+    '  "usage": {"input_tokens": 100, "output_tokens": 10},',
+    '  "result": "Multi-line response"',
+    '}',
+]
+
+
+class TestClaudeParser:
+    def test_basic(self) -> None:
+        r = parse_claude_output(CLAUDE_LINES)
+        assert r.success is True
+        assert r.session_id == "claude-789"
+        assert r.content == "Hello from Claude"
+        assert r.usage is not None
+        assert r.usage["input_tokens"] == 200
+        assert r.all_messages is None
+
+    def test_return_all(self) -> None:
+        r = parse_claude_output(CLAUDE_LINES, return_all=True)
+        assert r.all_messages is not None
+        assert len(r.all_messages) == 1
+        assert r.all_messages[0]["result"] == "Hello from Claude"
+
+    def test_empty(self) -> None:
+        r = parse_claude_output([])
+        assert r.success is False
+        assert r.content == "(no output)"
+        assert r.session_id is None
+
+    def test_single_line(self) -> None:
+        r = parse_claude_output(CLAUDE_LINES)
+        assert r.success is True
+        assert r.content == "Hello from Claude"
+
+    def test_multiline_json(self) -> None:
+        r = parse_claude_output(CLAUDE_MULTILINE)
+        assert r.success is True
+        assert r.session_id == "claude-multi"
+        assert r.content == "Multi-line response"
+
+    def test_no_result(self) -> None:
+        lines = ['{"session_id":"x","usage":{"input_tokens":10,"output_tokens":0}}']
+        r = parse_claude_output(lines)
+        assert r.success is False
+        assert r.content == "(no output)"
+        assert r.session_id == "x"
+
+    def test_warning_before_json(self) -> None:
+        lines = [
+            "Warning: some deprecation notice",
+            '{"session_id":"w","usage":{},"result":"OK"}',
+        ]
+        r = parse_claude_output(lines)
+        assert r.success is True
+        assert r.content == "OK"
+        assert r.session_id == "w"
+
+    def test_no_auth(self) -> None:
+        lines = [
+            "Error: Not authenticated. Please run claude login.",
+        ]
+        r = parse_claude_output(lines)
+        assert r.success is False
+        assert "authenticated" in r.content
+
+    def test_missing_session_id(self) -> None:
+        lines = ['{"usage":{},"result":"hi"}']
+        r = parse_claude_output(lines)
+        assert r.success is True
+        assert r.session_id is None
+
+    def test_malformed_json(self) -> None:
+        lines = ["{broken json}"]
+        r = parse_claude_output(lines)
+        assert r.success is False
+        assert r.content == "(no output)"
 
 
 class TestCodexParser:

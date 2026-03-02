@@ -19,6 +19,7 @@ async def run_cli(
     args: list[str],
     *,
     cwd: str | Path | None = None,
+    env: dict[str, str] | None = None,
     timeout: float = 300.0,
 ) -> ProcessResult:
     """Run a CLI command asynchronously and capture output.
@@ -31,6 +32,7 @@ async def run_cli(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=cwd,
+        env=env,
     )
 
     if proc.stdout is None or proc.stderr is None:

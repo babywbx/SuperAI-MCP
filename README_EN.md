@@ -1,10 +1,10 @@
 # 🚀 SuperAI MCP
 
-Wraps **Gemini CLI** and **Codex CLI** as MCP tools, enabling Claude Code to invoke other AI CLIs for code review and coding tasks.
+Wraps **Gemini CLI**, **Codex CLI**, and **Claude CLI** as MCP tools, enabling Claude Code to invoke other AI CLIs for code review and coding tasks.
 
 ## ✨ Features
 
-- 🔧 **Dual tools**: `mcp__super__codex` + `mcp__super__gemini`
+- 🔧 **Triple tools**: `mcp__super__codex` + `mcp__super__gemini` + `mcp__super__claude`
 - 📋 **Three modes**: prompt forwarding / git diff review / file list review
 - 🔄 **Session resume**: continue context via `session_id`
 - 🎯 **Model selection**: specify model and reasoning effort
@@ -49,6 +49,7 @@ Add to `.mcp.json`:
 | `review_base` | str | `""` | Review changes vs a branch |
 | `files` | list[str] | `None` | File list mode |
 | `return_all_messages` | bool | `False` | Return full event stream |
+| `auto_split` | bool | `False` | Auto-split large task into subtasks |
 
 ### `gemini`
 
@@ -63,6 +64,24 @@ Add to `.mcp.json`:
 | `review_base` | str | `""` | Review changes vs a branch |
 | `files` | list[str] | `None` | File list mode |
 | `return_all_messages` | bool | `False` | Return full event stream |
+| `auto_split` | bool | `False` | Auto-split large task into subtasks |
+
+### `claude`
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prompt` | str | required | Task instruction |
+| `cd` | str | required | Working directory |
+| `session_id` | str | `""` | Resume session (maps to --resume) |
+| `sandbox` | str | `"read-only"` | Sandbox mode (maps to permission mode) |
+| `model` | str | `""` | Model name (opus/sonnet/haiku, etc.) |
+| `effort` | str | `""` | Effort level: low/medium/high |
+| `max_budget_usd` | float | `0.0` | API cost limit (0=unlimited) |
+| `review_uncommitted` | bool | `False` | Review uncommitted changes |
+| `review_base` | str | `""` | Review changes vs a branch |
+| `files` | list[str] | `None` | File list mode |
+| `return_all_messages` | bool | `False` | Return full JSON |
+| `auto_split` | bool | `False` | Auto-split large task into subtasks |
 
 ## 🚦 Usage Modes
 

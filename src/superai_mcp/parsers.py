@@ -120,6 +120,62 @@ def parse_codex_output(
     )
 
 
+def parse_claude_output(
+    lines: list[str],
+    *,
+    return_all: bool = False,
+) -> CLIResult:
+    """Parse Claude `--output-format json` output into CLIResult.
+
+    Claude outputs a single JSON object (possibly multi-line) with fields:
+      session_id, usage, result
+    Non-JSON lines before the JSON block are captured as error text.
+    """
+    plain_lines: list[str] = []
+    json_lines: list[str] = []
+    in_json = False
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped and not in_json:
+            continue
+        if not in_json and stripped.startswith("{"):
+            in_json = True
+        if in_json:
+            json_lines.append(line)
+        else:
+            plain_lines.append(stripped)
+
+    if json_lines:
+        blob = "\n".join(json_lines)
+        data = _parse_json_object(blob)
+        if data is not None:
+            content = data.get("result", "")
+            if not isinstance(content, str):
+                content = ""
+            session_id = data.get("session_id")
+            if session_id is not None:
+                session_id = str(session_id)
+            usage = data.get("usage")
+            if not isinstance(usage, dict):
+                usage = None
+            return CLIResult(
+                success=bool(content),
+                session_id=session_id,
+                content=content or "(no output)",
+                all_messages=[data] if return_all else None,
+                usage=usage,
+            )
+
+    # No valid JSON — report plain text errors
+    error_text = "\n".join(plain_lines) if plain_lines else "(no output)"
+    return CLIResult(
+        success=False,
+        session_id=None,
+        content=error_text,
+    )
+
+
 def parse_gemini_output(
     lines: list[str],
     *,

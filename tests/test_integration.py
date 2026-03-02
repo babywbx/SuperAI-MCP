@@ -10,12 +10,13 @@ import shutil
 
 import pytest
 
-from superai_mcp.server import codex_tool, gemini_tool
+from superai_mcp.server import claude_tool, codex_tool, gemini_tool
 
 pytestmark = pytest.mark.integration
 
 SKIP_CODEX = not shutil.which("codex")
 SKIP_GEMINI = not shutil.which("gemini")
+SKIP_CLAUDE = not shutil.which("claude")
 
 
 # -- Codex tests --
@@ -58,6 +59,16 @@ class TestCodexIntegration:
         assert result["success"] is True
         assert result["usage"] is not None
         assert "input_tokens" in result["usage"]
+
+
+    async def test_auto_split_session_id_exclusive(self) -> None:
+        """auto_split and session_id are mutually exclusive."""
+        raw = await codex_tool(
+            prompt="test", cd="/tmp", auto_split=True, session_id="abc12345-1234-1234-1234-123456789abc",
+        )
+        result = json.loads(raw)
+        assert result["success"] is False
+        assert "mutually exclusive" in result["content"]
 
 
 # -- Gemini tests --
@@ -111,13 +122,77 @@ class TestGeminiIntegration:
         assert result["success"] is True
 
 
+    async def test_auto_split_session_id_exclusive(self) -> None:
+        """auto_split and session_id are mutually exclusive."""
+        raw = await gemini_tool(
+            prompt="test", cd="/tmp", auto_split=True, session_id="abc12345-1234-1234-1234-123456789abc",
+        )
+        result = json.loads(raw)
+        assert result["success"] is False
+        assert "mutually exclusive" in result["content"]
+
+
+# -- Claude tests --
+
+
+@pytest.mark.skipif(SKIP_CLAUDE, reason="claude CLI not installed")
+class TestClaudeIntegration:
+    async def test_basic_prompt(self) -> None:
+        """Claude can answer a simple prompt."""
+        raw = await claude_tool(prompt="Reply with exactly: ECHO", cd="/tmp")
+        result = json.loads(raw)
+        assert result["success"] is True
+        assert result["session_id"]
+        assert "ECHO" in result["content"]
+
+    async def test_session_id_returned(self) -> None:
+        """Claude returns a session_id for future resume."""
+        raw = await claude_tool(prompt="Say hello", cd="/tmp")
+        result = json.loads(raw)
+        assert result["success"] is True
+        assert result["session_id"]
+        assert len(result["session_id"]) > 10
+
+    async def test_return_all_messages(self) -> None:
+        """return_all_messages returns the JSON object."""
+        raw = await claude_tool(prompt="Say OK", cd="/tmp", return_all_messages=True)
+        result = json.loads(raw)
+        assert result["success"] is True
+        assert result["all_messages"] is not None
+        assert len(result["all_messages"]) > 0
+
+    async def test_usage_stats(self) -> None:
+        """Usage stats are captured from JSON output."""
+        raw = await claude_tool(prompt="Say hi", cd="/tmp")
+        result = json.loads(raw)
+        assert result["success"] is True
+        assert result["usage"] is not None
+        assert "input_tokens" in result["usage"]
+
+    async def test_model_selection(self) -> None:
+        """Claude can use a specific model."""
+        raw = await claude_tool(prompt="Say OK", cd="/tmp", model="sonnet")
+        result = json.loads(raw)
+        assert result["success"] is True
+
+
+    async def test_auto_split_session_id_exclusive(self) -> None:
+        """auto_split and session_id are mutually exclusive."""
+        raw = await claude_tool(
+            prompt="test", cd="/tmp", auto_split=True, session_id="abc12345-1234-1234-1234-123456789abc",
+        )
+        result = json.loads(raw)
+        assert result["success"] is False
+        assert "mutually exclusive" in result["content"]
+
+
 # -- Cross-tool parallel test --
 
 
-@pytest.mark.skipif(SKIP_CODEX or SKIP_GEMINI, reason="need both CLIs")
+@pytest.mark.skipif(SKIP_CODEX or SKIP_GEMINI or SKIP_CLAUDE, reason="need all CLIs")
 class TestParallel:
     async def test_parallel_calls(self) -> None:
-        """Both tools can run in parallel."""
+        """All three tools can run in parallel."""
         import asyncio
 
         codex_task = asyncio.create_task(
@@ -126,13 +201,20 @@ class TestParallel:
         gemini_task = asyncio.create_task(
             gemini_tool(prompt="Reply BETA", cd="/tmp")
         )
+        claude_task = asyncio.create_task(
+            claude_tool(prompt="Reply GAMMA", cd="/tmp")
+        )
 
-        codex_raw, gemini_raw = await asyncio.gather(codex_task, gemini_task)
+        codex_raw, gemini_raw, claude_raw = await asyncio.gather(
+            codex_task, gemini_task, claude_task,
+        )
 
         cr = json.loads(codex_raw)
         gr = json.loads(gemini_raw)
+        clr = json.loads(claude_raw)
         assert cr["success"] is True
         assert gr["success"] is True
-        # Both should return non-empty content (exact wording varies)
+        assert clr["success"] is True
         assert len(cr["content"]) > 0
         assert len(gr["content"]) > 0
+        assert len(clr["content"]) > 0

@@ -1,10 +1,10 @@
 # 🚀 SuperAI MCP
 
-将 **Gemini CLI** 和 **Codex CLI** 包装为 MCP 工具，让 Claude Code 能调用其他 AI CLI 进行 code review 和编码任务。
+将 **Gemini CLI**、**Codex CLI** 和 **Claude CLI** 包装为 MCP 工具，让 Claude Code 能调用其他 AI CLI 进行 code review 和编码任务。
 
 ## ✨ 特性
 
-- 🔧 **双工具**: `mcp__super__codex` + `mcp__super__gemini`
+- 🔧 **三工具**: `mcp__super__codex` + `mcp__super__gemini` + `mcp__super__claude`
 - 📋 **三种模式**: prompt 转发 / git diff review / 文件列表 review
 - 🔄 **会话续接**: 通过 `session_id` 延续上下文
 - 🎯 **模型选择**: 支持指定模型和推理深度
@@ -49,6 +49,7 @@ uv sync
 | `review_base` | str | `""` | 审查相对于某分支的更改 |
 | `files` | list[str] | `None` | 文件列表模式 |
 | `return_all_messages` | bool | `False` | 返回完整事件流 |
+| `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
 
 ### `gemini`
 
@@ -63,6 +64,24 @@ uv sync
 | `review_base` | str | `""` | 审查相对于某分支的更改 |
 | `files` | list[str] | `None` | 文件列表模式 |
 | `return_all_messages` | bool | `False` | 返回完整事件流 |
+| `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
+
+### `claude`
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `prompt` | str | 必填 | 任务指令 |
+| `cd` | str | 必填 | 工作目录 |
+| `session_id` | str | `""` | 会话续接 (映射到 --resume) |
+| `sandbox` | str | `"read-only"` | 沙盒模式 (映射到权限模式) |
+| `model` | str | `""` | 模型名 (opus/sonnet/haiku 等) |
+| `effort` | str | `""` | 推理深度: low/medium/high |
+| `max_budget_usd` | float | `0.0` | API 费用上限 (0=不限) |
+| `review_uncommitted` | bool | `False` | 审查未提交更改 |
+| `review_base` | str | `""` | 审查相对于某分支的更改 |
+| `files` | list[str] | `None` | 文件列表模式 |
+| `return_all_messages` | bool | `False` | 返回完整 JSON |
+| `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
 
 ## 🚦 使用模式
 

@@ -37,6 +37,28 @@ async def test_run_cwd(tmp_path: object) -> None:
     assert str(tmp_path) in result.stdout_lines[0]
 
 
+async def test_run_env() -> None:
+    """Custom env is passed to subprocess."""
+    import os
+
+    env = dict(os.environ)
+    env["SUPERAI_TEST_VAR"] = "hello123"
+    result = await run_cli("sh", ["-c", "echo $SUPERAI_TEST_VAR"], env=env)
+    assert result.returncode == 0
+    assert result.stdout_lines == ["hello123"]
+
+
+async def test_run_env_removes_var() -> None:
+    """Env without a var means subprocess doesn't see it."""
+    import os
+
+    env = dict(os.environ)
+    env.pop("HOME", None)
+    result = await run_cli("sh", ["-c", "echo ${HOME:-unset}"], env=env)
+    assert result.returncode == 0
+    assert result.stdout_lines == ["unset"]
+
+
 def test_process_result_frozen() -> None:
     r = ProcessResult(returncode=0, stdout_lines=["a"], stderr="")
     with pytest.raises(AttributeError):
