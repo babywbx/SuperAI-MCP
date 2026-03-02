@@ -64,6 +64,47 @@ class TestCodexParser:
         r = parse_codex_output(['{"type":"thread.started"}'])
         assert r.session_id is None
 
+    def test_auth_failure_401(self) -> None:
+        """Real codex output when API key is missing/invalid."""
+        lines = [
+            '{"type":"thread.started","thread_id":"abc"}',
+            '{"type":"turn.started"}',
+            '{"type":"error","message":"Reconnecting... 1/5 (401 Unauthorized)"}',
+            '{"type":"error","message":"Reconnecting... 2/5 (401 Unauthorized)"}',
+            '{"type":"error","message":"401 Unauthorized: Missing bearer auth"}',
+            '{"type":"turn.failed","error":{"message":"401 Unauthorized: Missing bearer auth"}}',
+        ]
+        r = parse_codex_output(lines)
+        assert r.success is False
+        assert "401" in r.content
+        assert "Unauthorized" in r.content
+        # Reconnect lines should be filtered out
+        assert "Reconnecting" not in r.content
+
+    def test_bad_model(self) -> None:
+        """Real codex output when model name is invalid."""
+        lines = [
+            '{"type":"thread.started","thread_id":"abc"}',
+            '{"type":"item.completed","item":{"type":"error","message":"Model not found"}}',
+            '{"type":"turn.failed","error":{"message":"Model not supported"}}',
+        ]
+        r = parse_codex_output(lines)
+        assert r.success is False
+        assert "Model not found" in r.content
+        assert "Model not supported" in r.content
+
+    def test_error_with_agent_output(self) -> None:
+        """If there IS agent output, errors don't override it."""
+        lines = [
+            '{"type":"thread.started","thread_id":"x"}',
+            '{"type":"error","message":"some warning"}',
+            '{"type":"item.completed","item":{"type":"agent_message","text":"Hello"}}',
+            '{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}',
+        ]
+        r = parse_codex_output(lines)
+        assert r.success is True
+        assert r.content == "Hello"
+
 
 class TestGeminiParser:
     def test_basic(self) -> None:
@@ -103,3 +144,26 @@ class TestGeminiParser:
     def test_missing_session_id(self) -> None:
         r = parse_gemini_output(['{"type":"init"}'])
         assert r.session_id is None
+
+    def test_no_auth_plain_text(self) -> None:
+        """Real gemini output when auth is not configured."""
+        lines = [
+            "Please set an Auth method in your settings.json or specify GEMINI_API_KEY",
+        ]
+        r = parse_gemini_output(lines)
+        assert r.success is False
+        assert "Auth" in r.content
+        assert "GEMINI_API_KEY" in r.content
+
+    def test_mixed_plain_and_json(self) -> None:
+        """Gemini sometimes prints warnings before JSON."""
+        lines = [
+            "Loaded cached credentials.",
+            '{"type":"init","session_id":"x"}',
+            '{"type":"message","role":"assistant","content":"Hi","delta":true}',
+            '{"type":"result","status":"success","stats":{"input_tokens":10}}',
+        ]
+        r = parse_gemini_output(lines)
+        assert r.success is True
+        assert r.content == "Hi"
+        assert r.session_id == "x"
