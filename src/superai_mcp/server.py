@@ -131,13 +131,29 @@ async def codex_tool(
                 r = await run_cli("codex", a, cwd=cd, timeout=timeout)
                 return parse_codex_output(r.stdout_lines)
 
-            # Codex resume cannot accept new prompt, so no resume_fn
-            parsed = await run_auto_split(effective_prompt, call_fn=_call)
+            async def _resume(p: str, sid: str, timeout: float) -> CLIResult:
+                a = ["exec", "resume", "--json", "--skip-git-repo-check"]
+                if model:
+                    a.extend(["-m", model])
+                if reasoning_effort:
+                    a.extend(["-c", f"model_reasoning_effort={reasoning_effort}"])
+                a.extend(["--", sid, p])
+                r = await run_cli("codex", a, cwd=cd, timeout=timeout)
+                return parse_codex_output(r.stdout_lines)
+
+            parsed = await run_auto_split(
+                effective_prompt, call_fn=_call, resume_fn=_resume,
+            )
             return parsed.model_dump_json()
 
-        # Resume mode: just resume the session, no context injection
+        # Resume mode: pass session_id and prompt as positional args
         if session_id:
-            args = ["exec", "resume", "--json", session_id]
+            args = ["exec", "resume", "--json", "--skip-git-repo-check"]
+            if model:
+                args.extend(["-m", model])
+            if reasoning_effort:
+                args.extend(["-c", f"model_reasoning_effort={reasoning_effort}"])
+            args.extend(["--", session_id, effective_prompt])
         else:
             args = [
                 "exec", "--json",
