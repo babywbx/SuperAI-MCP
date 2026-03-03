@@ -131,6 +131,40 @@ async def test_progress_elapsed_uses_float() -> None:
     assert any(e > 0 for e in elapsed_values), f"all elapsed were 0: {elapsed_values}"
 
 
+async def test_run_stdin_data() -> None:
+    """stdin_data is written to subprocess stdin."""
+    result = await run_cli(
+        "cat", [],
+        stdin_data=b"hello from stdin",
+    )
+    assert result.returncode == 0
+    assert result.stdout_lines == ["hello from stdin"]
+
+
+async def test_run_stdin_data_none_uses_devnull() -> None:
+    """stdin_data=None (default) keeps stdin as DEVNULL."""
+    result = await run_cli("echo", ["ok"], stdin_data=None)
+    assert result.returncode == 0
+    assert result.stdout_lines == ["ok"]
+
+
+async def test_run_stdin_data_large() -> None:
+    """Large stdin_data doesn't deadlock."""
+    # 500KB of text — well above typical pipe buffer (64KB)
+    big = ("x" * 999 + "\n") * 500
+    result = await run_cli("wc", ["-l"], stdin_data=big.encode())
+    assert result.returncode == 0
+    assert result.stdout_lines[0].strip() == "500"
+
+
+async def test_run_stdin_data_early_close() -> None:
+    """Child exiting before consuming all stdin doesn't raise BrokenPipeError."""
+    big = ("x" * 999 + "\n") * 500
+    result = await run_cli("head", ["-n", "1"], stdin_data=big.encode())
+    assert result.returncode == 0
+    assert len(result.stdout_lines) == 1
+
+
 def test_process_result_frozen() -> None:
     r = ProcessResult(returncode=0, stdout_lines=["a"], stderr="")
     with pytest.raises(AttributeError):

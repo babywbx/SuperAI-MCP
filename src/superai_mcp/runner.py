@@ -24,6 +24,7 @@ async def run_cli(
     *,
     cwd: str | Path | None = None,
     env: dict[str, str] | None = None,
+    stdin_data: bytes | None = None,
     timeout: float = 900.0,
     on_progress: Callable[[float, str], Awaitable[None]] | None = None,
 ) -> ProcessResult:
@@ -35,7 +36,7 @@ async def run_cli(
     proc = await asyncio.create_subprocess_exec(
         command,
         *args,
-        stdin=asyncio.subprocess.DEVNULL,
+        stdin=asyncio.subprocess.PIPE if stdin_data is not None else asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=cwd,
@@ -44,6 +45,23 @@ async def run_cli(
 
     if proc.stdout is None or proc.stderr is None:
         raise RuntimeError("Failed to capture subprocess pipes")
+
+    # Write stdin data concurrently to avoid deadlock with stdout/stderr draining.
+    # BrokenPipeError is suppressed when the child exits before consuming all input
+    # (e.g. head -n1), matching subprocess.communicate() semantics.
+    async def write_stdin(data: bytes) -> None:
+        assert proc.stdin is not None
+        try:
+            proc.stdin.write(data)
+            await proc.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            proc.stdin.close()
+
+    stdin_task: asyncio.Task[None] | None = None
+    if stdin_data is not None:
+        stdin_task = asyncio.create_task(write_stdin(stdin_data))
 
     # Shared buffer so the progress loop can peek at the latest line
     stdout_lines: list[str] = []
@@ -86,12 +104,18 @@ async def run_cli(
         wait_task.cancel()
         stdout_task.cancel()
         stderr_task.cancel()
-        await asyncio.gather(
-            wait_task, stdout_task, stderr_task, return_exceptions=True,
-        )
+        cleanup = [wait_task, stdout_task, stderr_task]
+        if stdin_task is not None:
+            stdin_task.cancel()
+            cleanup.append(stdin_task)
+        await asyncio.gather(*cleanup, return_exceptions=True)
         raise
 
-    stdout_lines, stderr = await asyncio.gather(stdout_task, stderr_task)
+    gather_tasks: list[asyncio.Task[object]] = [stdout_task, stderr_task]
+    if stdin_task is not None:
+        gather_tasks.append(stdin_task)
+    results = await asyncio.gather(*gather_tasks)
+    stdout_lines, stderr = results[0], results[1]
     return ProcessResult(
         returncode=proc.returncode if proc.returncode is not None else -1,
         stdout_lines=stdout_lines,
