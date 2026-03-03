@@ -4,7 +4,15 @@ import json
 
 import pytest
 
-from superai_mcp.server import _MAX_SNIPPET, _summarize_line
+from superai_mcp.server import (
+    _MAX_SNIPPET,
+    _STDIN_THRESHOLD,
+    _codex_prompt_args,
+    _codex_resume_prompt_args,
+    _claude_prompt_args,
+    _gemini_prompt_args,
+    _summarize_line,
+)
 
 
 class TestSummarizeLine:
@@ -136,3 +144,61 @@ class TestSummarizeLine:
         result = _summarize_line(line)
         assert len(result) == _MAX_SNIPPET
         assert result.startswith("assistant: ")
+
+
+class TestPromptArgHelpers:
+    def test_gemini_small_prompt(self) -> None:
+        args, data = _gemini_prompt_args("hello")
+        assert args == ["-p", "hello"]
+        assert data is None
+
+    def test_gemini_large_prompt(self) -> None:
+        big = "x" * (_STDIN_THRESHOLD + 1)
+        args, data = _gemini_prompt_args(big)
+        assert args == ["-p", ""]
+        assert data == big.encode("utf-8")
+
+    def test_codex_small_prompt(self) -> None:
+        args, data = _codex_prompt_args("hello")
+        assert args == ["--", "hello"]
+        assert data is None
+
+    def test_codex_large_prompt(self) -> None:
+        big = "x" * (_STDIN_THRESHOLD + 1)
+        args, data = _codex_prompt_args(big)
+        assert args == ["--", "-"]
+        assert data == big.encode("utf-8")
+
+    def test_codex_resume_small_prompt(self) -> None:
+        args, data = _codex_resume_prompt_args("sid-123", "hello")
+        assert args == ["--", "sid-123", "hello"]
+        assert data is None
+
+    def test_codex_resume_large_prompt(self) -> None:
+        big = "x" * (_STDIN_THRESHOLD + 1)
+        args, data = _codex_resume_prompt_args("sid-123", big)
+        assert args == ["--", "sid-123", "-"]
+        assert data == big.encode("utf-8")
+
+    def test_claude_small_prompt(self) -> None:
+        args, data = _claude_prompt_args("hello")
+        assert args == ["-p", "hello"]
+        assert data is None
+
+    def test_claude_large_prompt(self) -> None:
+        big = "x" * (_STDIN_THRESHOLD + 1)
+        args, data = _claude_prompt_args(big)
+        assert args == ["-p"]
+        assert data == big.encode("utf-8")
+
+    def test_threshold_boundary_exact(self) -> None:
+        """Exactly at threshold stays as arg."""
+        prompt = "x" * _STDIN_THRESHOLD
+        _, data = _gemini_prompt_args(prompt)
+        assert data is None
+
+    def test_threshold_boundary_one_over(self) -> None:
+        """One byte over threshold triggers stdin."""
+        prompt = "x" * (_STDIN_THRESHOLD + 1)
+        _, data = _gemini_prompt_args(prompt)
+        assert data is not None

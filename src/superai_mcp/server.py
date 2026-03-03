@@ -46,6 +46,42 @@ _CODEX_EFFORT_CHAIN = ("high", "medium", "low")
 _PROBE_PROMPT = "reply ok"
 _PROBE_TIMEOUT = 30.0
 
+# Prompt size threshold for switching from CLI arg to stdin piping.
+# Well under macOS ARG_MAX (~1MB) to leave room for env vars and other args.
+_STDIN_THRESHOLD = 200_000  # bytes
+
+
+def _gemini_prompt_args(prompt: str) -> tuple[list[str], bytes | None]:
+    """Build Gemini prompt args; large prompts go via stdin."""
+    encoded = prompt.encode("utf-8")
+    if len(encoded) > _STDIN_THRESHOLD:
+        return ["-p", ""], encoded
+    return ["-p", prompt], None
+
+
+def _codex_prompt_args(prompt: str) -> tuple[list[str], bytes | None]:
+    """Build Codex prompt args; large prompts go via stdin."""
+    encoded = prompt.encode("utf-8")
+    if len(encoded) > _STDIN_THRESHOLD:
+        return ["--", "-"], encoded
+    return ["--", prompt], None
+
+
+def _codex_resume_prompt_args(session_id: str, prompt: str) -> tuple[list[str], bytes | None]:
+    """Build Codex resume prompt args; large prompts go via stdin."""
+    encoded = prompt.encode("utf-8")
+    if len(encoded) > _STDIN_THRESHOLD:
+        return ["--", session_id, "-"], encoded
+    return ["--", session_id, prompt], None
+
+
+def _claude_prompt_args(prompt: str) -> tuple[list[str], bytes | None]:
+    """Build Claude prompt args; large prompts go via stdin."""
+    encoded = prompt.encode("utf-8")
+    if len(encoded) > _STDIN_THRESHOLD:
+        return ["-p"], encoded
+    return ["-p", prompt], None
+
 
 def _err(msg: str) -> str:
     """Return a JSON error response."""
