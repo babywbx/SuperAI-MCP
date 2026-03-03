@@ -2,8 +2,6 @@
 
 import json
 
-import pytest
-
 from superai_mcp.server import (
     _MAX_SNIPPET,
     _STDIN_THRESHOLD,

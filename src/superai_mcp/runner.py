@@ -58,6 +58,10 @@ async def run_cli(
             pass
         finally:
             proc.stdin.close()
+            try:
+                await proc.stdin.wait_closed()
+            except OSError:
+                pass
 
     stdin_task: asyncio.Task[None] | None = None
     if stdin_data is not None:
@@ -111,11 +115,9 @@ async def run_cli(
         await asyncio.gather(*cleanup, return_exceptions=True)
         raise
 
-    gather_tasks: list[asyncio.Task[object]] = [stdout_task, stderr_task]
     if stdin_task is not None:
-        gather_tasks.append(stdin_task)
-    results = await asyncio.gather(*gather_tasks)
-    stdout_lines, stderr = results[0], results[1]
+        await stdin_task
+    stdout_lines, stderr = await asyncio.gather(stdout_task, stderr_task)
     return ProcessResult(
         returncode=proc.returncode if proc.returncode is not None else -1,
         stdout_lines=stdout_lines,

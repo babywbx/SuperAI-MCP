@@ -52,7 +52,11 @@ _STDIN_THRESHOLD = 200_000  # bytes
 
 
 def _gemini_prompt_args(prompt: str) -> tuple[list[str], bytes | None]:
-    """Build Gemini prompt args; large prompts go via stdin."""
+    """Build Gemini prompt args; large prompts go via stdin.
+
+    Gemini CLI: ``-p ""`` triggers non-interactive mode; stdin content is
+    prepended (docs: "Appended to input on stdin if any").
+    """
     encoded = prompt.encode("utf-8")
     if len(encoded) > _STDIN_THRESHOLD:
         return ["-p", ""], encoded
@@ -275,6 +279,7 @@ async def codex_tool(
 
         if auto_split:
             async def _call(p: str, timeout: float) -> CLIResult:
+                prompt_args, stdin_data = _codex_prompt_args(p)
                 a = [
                     "exec", "--json",
                     "--sandbox", validated_sandbox.value,
@@ -285,9 +290,9 @@ async def codex_tool(
                     a.extend(["-m", model])
                 if reasoning_effort:
                     a.extend(["-c", f"model_reasoning_effort={reasoning_effort}"])
-                a.extend(["--", p])
+                a.extend(prompt_args)
                 r = await run_cli(
-                    "codex", a, cwd=cd, timeout=timeout,
+                    "codex", a, cwd=cd, stdin_data=stdin_data, timeout=timeout,
                     on_progress=_make_progress_cb(ctx, "codex", timeout),
                 )
                 parsed = parse_codex_output(r.stdout_lines)
@@ -296,14 +301,15 @@ async def codex_tool(
                 return parsed
 
             async def _resume(p: str, sid: str, timeout: float) -> CLIResult:
+                prompt_args, stdin_data = _codex_resume_prompt_args(sid, p)
                 a = ["exec", "resume", "--json", "--skip-git-repo-check"]
                 if model:
                     a.extend(["-m", model])
                 if reasoning_effort:
                     a.extend(["-c", f"model_reasoning_effort={reasoning_effort}"])
-                a.extend(["--", sid, p])
+                a.extend(prompt_args)
                 r = await run_cli(
-                    "codex", a, cwd=cd, timeout=timeout,
+                    "codex", a, cwd=cd, stdin_data=stdin_data, timeout=timeout,
                     on_progress=_make_progress_cb(ctx, "codex", timeout),
                 )
                 parsed = parse_codex_output(r.stdout_lines)
@@ -318,13 +324,17 @@ async def codex_tool(
 
         # Resume mode: pass session_id and prompt as positional args
         if session_id:
+            prompt_args, stdin_data = _codex_resume_prompt_args(
+                session_id, effective_prompt,
+            )
             args = ["exec", "resume", "--json", "--skip-git-repo-check"]
             if model:
                 args.extend(["-m", model])
             if reasoning_effort:
                 args.extend(["-c", f"model_reasoning_effort={reasoning_effort}"])
-            args.extend(["--", session_id, effective_prompt])
+            args.extend(prompt_args)
         else:
+            prompt_args, stdin_data = _codex_prompt_args(effective_prompt)
             args = [
                 "exec", "--json",
                 "--sandbox", validated_sandbox.value,
@@ -335,10 +345,12 @@ async def codex_tool(
                 args.extend(["-m", model])
             if reasoning_effort:
                 args.extend(["-c", f"model_reasoning_effort={reasoning_effort}"])
-            args.extend(["--", effective_prompt])
+            args.extend(prompt_args)
 
         progress_cb = _make_progress_cb(ctx, "codex", 300.0)
-        result = await run_cli("codex", args, cwd=cd, on_progress=progress_cb)
+        result = await run_cli(
+            "codex", args, cwd=cd, stdin_data=stdin_data, on_progress=progress_cb,
+        )
         parsed = parse_codex_output(result.stdout_lines, return_all=return_all_messages)
         if not parsed.model:
             parsed = parsed.model_copy(update={"model": model or None})
@@ -372,6 +384,9 @@ async def codex_tool(
                         continue  # this level also rate-limited, try next
                     break  # different error, stop
                 # Probe OK — send the real prompt
+                retry_prompt_args, retry_stdin = _codex_prompt_args(
+                    effective_prompt,
+                )
                 retry_args = [
                     "exec", "--json",
                     "--sandbox", validated_sandbox.value,
@@ -381,9 +396,10 @@ async def codex_tool(
                 if model:
                     retry_args.extend(["-m", model])
                 retry_args.extend(["-c", f"model_reasoning_effort={next_effort}"])
-                retry_args.extend(["--", effective_prompt])
+                retry_args.extend(retry_prompt_args)
                 retry_result = await run_cli(
-                    "codex", retry_args, cwd=cd, on_progress=progress_cb,
+                    "codex", retry_args, cwd=cd, stdin_data=retry_stdin,
+                    on_progress=progress_cb,
                 )
                 parsed = parse_codex_output(
                     retry_result.stdout_lines, return_all=return_all_messages,
@@ -470,13 +486,14 @@ async def gemini_tool(
 
         if auto_split:
             async def _call(p: str, timeout: float) -> CLIResult:
-                a = ["-p", p, "-o", "stream-json"]
+                prompt_args, stdin_data = _gemini_prompt_args(p)
+                a = prompt_args + ["-o", "stream-json"]
                 if sandbox:
                     a.append("--sandbox")
                 if model:
                     a.extend(["--model", model])
                 r = await run_cli(
-                    "gemini", a, cwd=cd, timeout=timeout,
+                    "gemini", a, cwd=cd, stdin_data=stdin_data, timeout=timeout,
                     on_progress=_make_progress_cb(ctx, "gemini", timeout),
                 )
                 parsed = parse_gemini_output(r.stdout_lines)
@@ -485,13 +502,14 @@ async def gemini_tool(
                 return parsed
 
             async def _resume(p: str, sid: str, timeout: float) -> CLIResult:
-                a = ["-p", p, "-o", "stream-json", "--resume", sid]
+                prompt_args, stdin_data = _gemini_prompt_args(p)
+                a = prompt_args + ["-o", "stream-json", "--resume", sid]
                 if sandbox:
                     a.append("--sandbox")
                 if model:
                     a.extend(["--model", model])
                 r = await run_cli(
-                    "gemini", a, cwd=cd, timeout=timeout,
+                    "gemini", a, cwd=cd, stdin_data=stdin_data, timeout=timeout,
                     on_progress=_make_progress_cb(ctx, "gemini", timeout),
                 )
                 parsed = parse_gemini_output(r.stdout_lines)
@@ -504,7 +522,8 @@ async def gemini_tool(
             )
             return parsed.model_dump_json(exclude_none=True)
 
-        args = ["-p", effective_prompt, "-o", "stream-json"]
+        prompt_args, stdin_data = _gemini_prompt_args(effective_prompt)
+        args = prompt_args + ["-o", "stream-json"]
         if sandbox:
             args.append("--sandbox")
         if model:
@@ -513,20 +532,26 @@ async def gemini_tool(
             args.extend(["--resume", session_id])
 
         progress_cb = _make_progress_cb(ctx, "gemini", 300.0)
-        result = await run_cli("gemini", args, cwd=cd, on_progress=progress_cb)
+        result = await run_cli(
+            "gemini", args, cwd=cd, stdin_data=stdin_data, on_progress=progress_cb,
+        )
         parsed = parse_gemini_output(result.stdout_lines, return_all=return_all_messages)
         if not parsed.model:
             parsed = parsed.model_copy(update={"model": model or None})
 
         # Quota fallback: retry once with flash model (check before overwriting content)
         if is_rate_limited(parsed) and model != "flash":
-            retry_args = ["-p", effective_prompt, "-o", "stream-json"]
+            retry_prompt_args, retry_stdin = _gemini_prompt_args(effective_prompt)
+            retry_args = retry_prompt_args + ["-o", "stream-json"]
             if sandbox:
                 retry_args.append("--sandbox")
             retry_args.extend(["--model", "flash"])
             if session_id:
                 retry_args.extend(["--resume", session_id])
-            retry_result = await run_cli("gemini", retry_args, cwd=cd, on_progress=progress_cb)
+            retry_result = await run_cli(
+                "gemini", retry_args, cwd=cd, stdin_data=retry_stdin,
+                on_progress=progress_cb,
+            )
             parsed = parse_gemini_output(retry_result.stdout_lines, return_all=return_all_messages)
             if parsed.success:
                 parsed = parsed.model_copy(update={
@@ -627,14 +652,16 @@ async def claude_tool(
             env = _claude_env()
 
             async def _call(p: str, timeout: float) -> CLIResult:
-                a = ["-p", p, "--output-format", "json"]
+                prompt_args, stdin_data = _claude_prompt_args(p)
+                a = prompt_args + ["--output-format", "json"]
                 if model:
                     a.extend(["--model", model])
                 if effort:
                     a.extend(["--effort", effort])
                 a.extend(sandbox_args)
                 r = await run_cli(
-                    "claude", a, cwd=cd, env=env, timeout=timeout,
+                    "claude", a, cwd=cd, env=env, stdin_data=stdin_data,
+                    timeout=timeout,
                     on_progress=_make_progress_cb(ctx, "claude", timeout),
                 )
                 parsed = parse_claude_output(r.stdout_lines)
@@ -643,14 +670,16 @@ async def claude_tool(
                 return parsed
 
             async def _resume(p: str, sid: str, timeout: float) -> CLIResult:
-                a = ["-p", p, "--output-format", "json", "--resume", sid]
+                prompt_args, stdin_data = _claude_prompt_args(p)
+                a = prompt_args + ["--output-format", "json", "--resume", sid]
                 if model:
                     a.extend(["--model", model])
                 if effort:
                     a.extend(["--effort", effort])
                 a.extend(sandbox_args)
                 r = await run_cli(
-                    "claude", a, cwd=cd, env=env, timeout=timeout,
+                    "claude", a, cwd=cd, env=env, stdin_data=stdin_data,
+                    timeout=timeout,
                     on_progress=_make_progress_cb(ctx, "claude", timeout),
                 )
                 parsed = parse_claude_output(r.stdout_lines)
@@ -663,7 +692,8 @@ async def claude_tool(
             )
             return parsed.model_dump_json(exclude_none=True)
 
-        args = ["-p", effective_prompt, "--output-format", "json"]
+        prompt_args, stdin_data = _claude_prompt_args(effective_prompt)
+        args = prompt_args + ["--output-format", "json"]
 
         if session_id:
             args.extend(["--resume", session_id])
@@ -678,7 +708,8 @@ async def claude_tool(
         env = _claude_env()
         progress_cb = _make_progress_cb(ctx, "claude", 300.0)
         result = await run_cli(
-            "claude", args, cwd=cd, env=env, on_progress=progress_cb,
+            "claude", args, cwd=cd, env=env, stdin_data=stdin_data,
+            on_progress=progress_cb,
         )
         parsed = parse_claude_output(result.stdout_lines, return_all=return_all_messages)
         if not parsed.model:
@@ -706,15 +737,20 @@ async def claude_tool(
                         continue  # this level also rate-limited, try next
                     break  # different error, stop
                 # Probe OK — send the real prompt
-                retry_args = ["-p", effective_prompt, "--output-format", "json",
-                              "--model", fallback_model]
+                retry_prompt_args, retry_stdin = _claude_prompt_args(
+                    effective_prompt,
+                )
+                retry_args = retry_prompt_args + [
+                    "--output-format", "json", "--model", fallback_model,
+                ]
                 if effort:
                     retry_args.extend(["--effort", effort])
                 if max_budget_usd > 0:
                     retry_args.extend(["--max-budget-usd", str(max_budget_usd)])
                 retry_args.extend(sandbox_args)
                 retry_result = await run_cli(
-                    "claude", retry_args, cwd=cd, env=env, on_progress=progress_cb,
+                    "claude", retry_args, cwd=cd, env=env, stdin_data=retry_stdin,
+                    on_progress=progress_cb,
                 )
                 parsed = parse_claude_output(
                     retry_result.stdout_lines, return_all=return_all_messages,

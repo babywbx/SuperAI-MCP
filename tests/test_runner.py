@@ -63,8 +63,6 @@ async def test_progress_callback_called() -> None:
     """on_progress is called during long-running commands."""
     from unittest.mock import AsyncMock
 
-    from superai_mcp.runner import _PROGRESS_INTERVAL
-
     progress_mock = AsyncMock()
 
     # Use a process that sleeps for longer than the interval
