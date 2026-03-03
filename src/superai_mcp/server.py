@@ -175,7 +175,7 @@ def _make_progress_cb(
 
     async def _cb(elapsed: float, latest_line: str) -> None:
         remaining = timeout - elapsed
-        msg = f"{tool_name} [{remaining:.0f}s left]"
+        msg = f"{tool_name} [timeout in {remaining:.0f}s]"
         snippet = _summarize_line(latest_line)
         if snippet:
             msg = f"{msg} {snippet}"

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 # Interval in seconds between progress callbacks
-_PROGRESS_INTERVAL = 25.0
+_PROGRESS_INTERVAL = 5.0
 
 
 @dataclass(frozen=True)
