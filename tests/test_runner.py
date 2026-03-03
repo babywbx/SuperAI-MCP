@@ -100,7 +100,7 @@ async def test_progress_callback_exception_cleans_up() -> None:
     original_interval = runner_mod._PROGRESS_INTERVAL
     runner_mod._PROGRESS_INTERVAL = 0.1
 
-    async def _bad_progress(elapsed: int) -> None:
+    async def _bad_progress(elapsed: float, latest_line: str) -> None:
         raise RuntimeError("callback boom")
 
     try:
@@ -119,7 +119,7 @@ async def test_progress_elapsed_uses_float() -> None:
 
     elapsed_values: list[float] = []
 
-    async def _track(elapsed: float) -> None:
+    async def _track(elapsed: float, latest_line: str) -> None:
         elapsed_values.append(elapsed)
 
     try:

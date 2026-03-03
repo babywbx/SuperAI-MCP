@@ -1,0 +1,138 @@
+"""Tests for server helper functions."""
+
+import json
+
+import pytest
+
+from superai_mcp.server import _MAX_SNIPPET, _summarize_line
+
+
+class TestSummarizeLine:
+    def test_empty_string(self) -> None:
+        assert _summarize_line("") == ""
+
+    # -- Codex events --
+
+    def test_codex_turn_started(self) -> None:
+        line = json.dumps({"type": "turn.started"})
+        assert _summarize_line(line) == "turn.started"
+
+    def test_codex_turn_completed(self) -> None:
+        line = json.dumps({"type": "turn.completed"})
+        assert _summarize_line(line) == "turn.completed"
+
+    def test_codex_turn_failed_with_message(self) -> None:
+        line = json.dumps({
+            "type": "turn.failed",
+            "error": {"message": "rate limit exceeded"},
+        })
+        assert _summarize_line(line) == "turn.failed: rate limit exceeded"
+
+    def test_codex_turn_failed_no_message(self) -> None:
+        line = json.dumps({"type": "turn.failed"})
+        assert _summarize_line(line) == "turn.failed"
+
+    def test_codex_error(self) -> None:
+        line = json.dumps({"type": "error", "message": "something broke"})
+        assert _summarize_line(line) == "error: something broke"
+
+    def test_codex_item_completed_reasoning(self) -> None:
+        line = json.dumps({
+            "type": "item.completed",
+            "item": {"type": "reasoning", "text": "Let me analyze the code structure"},
+        })
+        assert _summarize_line(line) == "reasoning: Let me analyze the code structure"
+
+    def test_codex_item_completed_agent_message(self) -> None:
+        line = json.dumps({
+            "type": "item.completed",
+            "item": {"type": "agent_message", "text": "Here's the fix"},
+        })
+        assert _summarize_line(line) == "message: Here's the fix"
+
+    def test_codex_item_completed_message(self) -> None:
+        line = json.dumps({
+            "type": "item.completed",
+            "item": {"type": "message", "text": "Done"},
+        })
+        assert _summarize_line(line) == "message: Done"
+
+    def test_codex_item_completed_error(self) -> None:
+        line = json.dumps({
+            "type": "item.completed",
+            "item": {"type": "error", "message": "something went wrong"},
+        })
+        assert _summarize_line(line) == "error: something went wrong"
+
+    def test_codex_item_completed_error_no_message(self) -> None:
+        line = json.dumps({
+            "type": "item.completed",
+            "item": {"type": "error"},
+        })
+        assert _summarize_line(line) == "error"
+
+    def test_codex_thread_started(self) -> None:
+        line = json.dumps({"type": "thread.started", "thread_id": "abc-123"})
+        assert _summarize_line(line) == "thread.started"
+
+    def test_codex_item_completed_no_text(self) -> None:
+        line = json.dumps({
+            "type": "item.completed",
+            "item": {"type": "reasoning"},
+        })
+        assert _summarize_line(line) == "item.completed"
+
+    # -- Gemini events --
+
+    def test_gemini_assistant_message(self) -> None:
+        line = json.dumps({"role": "assistant", "content": "The function should..."})
+        assert _summarize_line(line) == "assistant: The function should..."
+
+    def test_gemini_init(self) -> None:
+        line = json.dumps({"type": "init", "model": "gemini-3.1-pro"})
+        assert _summarize_line(line) == "init: gemini-3.1-pro"
+
+    def test_gemini_init_no_model(self) -> None:
+        line = json.dumps({"type": "init"})
+        assert _summarize_line(line) == "init"
+
+    def test_gemini_result(self) -> None:
+        line = json.dumps({"type": "result", "status": "success"})
+        assert _summarize_line(line) == "result: success"
+
+    def test_gemini_result_no_status(self) -> None:
+        line = json.dumps({"type": "result"})
+        assert _summarize_line(line) == "result"
+
+    # -- Non-JSON / fallback --
+
+    def test_non_json_line(self) -> None:
+        assert _summarize_line("some plain text") == "some plain text"
+
+    def test_non_dict_json(self) -> None:
+        line = json.dumps([1, 2, 3])
+        assert _summarize_line(line) == line[:_MAX_SNIPPET]
+
+    # -- Truncation --
+
+    def test_truncation_at_max_snippet(self) -> None:
+        long_text = "x" * 200
+        result = _summarize_line(long_text)
+        assert len(result) == _MAX_SNIPPET
+
+    def test_truncation_codex_reasoning(self) -> None:
+        long_reason = "a" * 200
+        line = json.dumps({
+            "type": "item.completed",
+            "item": {"type": "reasoning", "text": long_reason},
+        })
+        result = _summarize_line(line)
+        assert len(result) == _MAX_SNIPPET
+        assert result.startswith("reasoning: ")
+
+    def test_truncation_gemini_assistant(self) -> None:
+        long_content = "b" * 200
+        line = json.dumps({"role": "assistant", "content": long_content})
+        result = _summarize_line(line)
+        assert len(result) == _MAX_SNIPPET
+        assert result.startswith("assistant: ")

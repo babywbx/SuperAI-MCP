@@ -58,17 +58,88 @@ def _safe_stderr(stderr: str) -> str:
     return s[:_MAX_STDERR] if len(s) > _MAX_STDERR else s
 
 
+_MAX_SNIPPET = 80
+
+
+def _summarize_line(line: str) -> str:
+    """Extract a human-readable snippet from a CLI JSON output line."""
+    if not line:
+        return ""
+
+    try:
+        obj = json.loads(line)
+    except (json.JSONDecodeError, ValueError):
+        # Non-JSON (e.g. Claude progress text) — return raw truncated
+        return line[:_MAX_SNIPPET]
+
+    if not isinstance(obj, dict):
+        return line[:_MAX_SNIPPET]
+
+    # Codex JSONL events
+    event_type = obj.get("type", "")
+    if event_type in ("turn.started", "turn.completed", "turn.failed"):
+        msg = event_type
+        if event_type == "turn.failed":
+            err = obj.get("error", {})
+            if isinstance(err, dict) and err.get("message"):
+                msg = f"{event_type}: {err['message']}"
+        return msg[:_MAX_SNIPPET]
+
+    if event_type == "error":
+        err_msg = obj.get("message", "") or obj.get("error", "")
+        return f"error: {err_msg}"[:_MAX_SNIPPET]
+
+    if event_type == "thread.started":
+        return "thread.started"
+
+    if event_type == "item.completed":
+        item = obj.get("item", {})
+        if isinstance(item, dict):
+            item_type = item.get("type", "")
+            if item_type == "error":
+                emsg = item.get("message", "")
+                return f"error: {emsg}"[:_MAX_SNIPPET] if emsg else "error"
+            text = item.get("text", "")
+            if item_type == "reasoning" and text:
+                return f"reasoning: {text}"[:_MAX_SNIPPET]
+            if item_type in ("agent_message", "message") and text:
+                return f"message: {text}"[:_MAX_SNIPPET]
+        return event_type[:_MAX_SNIPPET]
+
+    # Gemini stream-json events
+    if "role" in obj and obj.get("role") == "assistant":
+        content = obj.get("content", "")
+        if content:
+            return f"assistant: {content}"[:_MAX_SNIPPET]
+
+    if event_type == "init":
+        model_name = obj.get("model", "")
+        return f"init: {model_name}"[:_MAX_SNIPPET] if model_name else "init"
+
+    if event_type == "result":
+        status = obj.get("status", "")
+        return f"result: {status}"[:_MAX_SNIPPET] if status else "result"
+
+    # Fallback: raw truncated
+    return line[:_MAX_SNIPPET]
+
+
 def _make_progress_cb(
     ctx: Context | None,
     tool_name: str,
     timeout: float,
-) -> Callable[[float], Awaitable[None]] | None:
+) -> Callable[[float, str], Awaitable[None]] | None:
     """Build an on_progress callback for run_cli, or None if ctx is unavailable."""
     if ctx is None:
         return None
 
-    async def _cb(elapsed: float) -> None:
-        await ctx.report_progress(elapsed, timeout, f"{tool_name} running ({elapsed:.0f}s)")
+    async def _cb(elapsed: float, latest_line: str) -> None:
+        remaining = timeout - elapsed
+        msg = f"{tool_name} [{remaining:.0f}s left]"
+        snippet = _summarize_line(latest_line)
+        if snippet:
+            msg = f"{msg} {snippet}"
+        await ctx.report_progress(elapsed, timeout, msg)
 
     return _cb
 

@@ -24,13 +24,13 @@ async def run_cli(
     *,
     cwd: str | Path | None = None,
     env: dict[str, str] | None = None,
-    timeout: float = 300.0,
-    on_progress: Callable[[float], Awaitable[None]] | None = None,
+    timeout: float = 900.0,
+    on_progress: Callable[[float, str], Awaitable[None]] | None = None,
 ) -> ProcessResult:
     """Run a CLI command asynchronously and capture output.
 
     Raises asyncio.TimeoutError if the process exceeds `timeout` seconds.
-    Calls on_progress(elapsed_seconds) every ~25s while waiting.
+    Calls on_progress(elapsed_seconds, latest_stdout_line) every ~25s while waiting.
     """
     proc = await asyncio.create_subprocess_exec(
         command,
@@ -45,14 +45,16 @@ async def run_cli(
     if proc.stdout is None or proc.stderr is None:
         raise RuntimeError("Failed to capture subprocess pipes")
 
+    # Shared buffer so the progress loop can peek at the latest line
+    stdout_lines: list[str] = []
+
     async def drain_lines(stream: asyncio.StreamReader) -> list[str]:
-        lines: list[str] = []
         while True:
             raw = await stream.readline()
             if not raw:
                 break
-            lines.append(raw.decode("utf-8", errors="replace").rstrip("\r\n"))
-        return lines
+            stdout_lines.append(raw.decode("utf-8", errors="replace").rstrip("\r\n"))
+        return stdout_lines
 
     async def drain_all(stream: asyncio.StreamReader) -> str:
         data = await stream.read()
@@ -76,7 +78,8 @@ async def run_cli(
             if remaining <= 0:
                 raise asyncio.TimeoutError()
             if on_progress is not None:
-                await on_progress(elapsed)
+                latest = stdout_lines[-1] if stdout_lines else ""
+                await on_progress(elapsed, latest)
     except BaseException:
         proc.kill()
         await proc.wait()
