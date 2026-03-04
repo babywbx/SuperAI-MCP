@@ -270,3 +270,128 @@ class TestVoteTool:
         )
         result = json.loads(raw)
         assert not result["success"]
+
+
+from superai_mcp.server import debate_tool
+
+
+class TestDebateTool:
+    async def test_basic_debate(self) -> None:
+        call_log: list[tuple[str, str]] = []
+
+        async def fake_codex(**kwargs) -> str:
+            call_log.append(("codex", kwargs["prompt"]))
+            return _ok("codex position")
+
+        async def fake_claude(**kwargs) -> str:
+            call_log.append(("claude", kwargs["prompt"]))
+            return _ok("claude critique")
+
+        with patch("superai_mcp.server._TARGET_FNS", {
+            "codex": fake_codex,
+            "claude": fake_claude,
+        }):
+            raw = await debate_tool(
+                prompt="Best database for this app?",
+                side_a="codex",
+                side_b="claude",
+                rounds=2,
+                cd="/tmp",
+            )
+        result = json.loads(raw)
+        assert result["success"]
+        assert len(result["rounds"]) == 2
+        assert result["rounds"][0]["side"] == "codex"
+        assert result["rounds"][1]["side"] == "claude"
+
+    async def test_opponent_response_injected(self) -> None:
+        calls: list[dict] = []
+
+        async def fake_codex(**kwargs) -> str:
+            calls.append(kwargs)
+            return _ok("codex says hello")
+
+        async def fake_claude(**kwargs) -> str:
+            calls.append(kwargs)
+            return _ok("claude responds")
+
+        with patch("superai_mcp.server._TARGET_FNS", {
+            "codex": fake_codex,
+            "claude": fake_claude,
+        }):
+            await debate_tool(
+                prompt="topic",
+                side_a="codex",
+                side_b="claude",
+                rounds=2,
+                cd="/tmp",
+            )
+        assert "<opponent_response>" in calls[1]["prompt"]
+        assert "codex says hello" in calls[1]["prompt"]
+
+    async def test_three_rounds(self) -> None:
+        async def fake_codex(**kwargs) -> str:
+            return _ok("codex round")
+
+        async def fake_claude(**kwargs) -> str:
+            return _ok("claude round")
+
+        with patch("superai_mcp.server._TARGET_FNS", {
+            "codex": fake_codex,
+            "claude": fake_claude,
+        }):
+            raw = await debate_tool(
+                prompt="topic",
+                side_a="codex",
+                side_b="claude",
+                rounds=3,
+                cd="/tmp",
+            )
+        result = json.loads(raw)
+        assert len(result["rounds"]) == 3
+        assert result["rounds"][0]["side"] == "codex"
+        assert result["rounds"][1]["side"] == "claude"
+        assert result["rounds"][2]["side"] == "codex"
+        assert result["final_answer"] == "codex round"
+
+    async def test_invalid_side(self) -> None:
+        raw = await debate_tool(
+            prompt="topic",
+            side_a="invalid",
+            cd="/tmp",
+        )
+        result = json.loads(raw)
+        assert not result["success"]
+
+    async def test_same_sides(self) -> None:
+        raw = await debate_tool(
+            prompt="topic",
+            side_a="codex",
+            side_b="codex",
+            cd="/tmp",
+        )
+        result = json.loads(raw)
+        assert not result["success"]
+        assert "different" in result["content"].lower() or "same" in result["content"].lower()
+
+    async def test_debate_fail_mid_round(self) -> None:
+        async def fake_codex(**kwargs) -> str:
+            return _ok("codex ok")
+
+        async def fail_claude(**kwargs) -> str:
+            return _fail("claude error")
+
+        with patch("superai_mcp.server._TARGET_FNS", {
+            "codex": fake_codex,
+            "claude": fail_claude,
+        }):
+            raw = await debate_tool(
+                prompt="topic",
+                side_a="codex",
+                side_b="claude",
+                rounds=3,
+                cd="/tmp",
+            )
+        result = json.loads(raw)
+        assert not result["success"]
+        assert len(result["rounds"]) == 2
