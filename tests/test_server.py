@@ -17,7 +17,6 @@ from superai_mcp.server import (
     _codex_resume_prompt_args,
     _claude_prompt_args,
     _gemini_prompt_args,
-    _normalize_gemini_model,
     _get_depth,
     _summarize_line,
     _usage,
@@ -492,20 +491,3 @@ class TestNestingDepth:
 
     def test_max_depth_default(self) -> None:
         assert _MAX_DEPTH == 5
-
-
-class TestNormalizeGeminiModel:
-    def test_flash_lite_stripped(self) -> None:
-        assert _normalize_gemini_model("gemini-3.1-flash-lite-preview") == "gemini-3.1-flash-preview"
-
-    def test_flash_lite_no_suffix(self) -> None:
-        assert _normalize_gemini_model("gemini-2.0-flash-lite") == "gemini-2.0-flash"
-
-    def test_non_lite_unchanged(self) -> None:
-        assert _normalize_gemini_model("gemini-3.1-pro-preview") == "gemini-3.1-pro-preview"
-
-    def test_empty_unchanged(self) -> None:
-        assert _normalize_gemini_model("") == ""
-
-    def test_flash_unchanged(self) -> None:
-        assert _normalize_gemini_model("gemini-3-flash-preview") == "gemini-3-flash-preview"
