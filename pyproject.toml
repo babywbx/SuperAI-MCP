@@ -6,6 +6,7 @@ readme = "README.md"
 authors = [
     { name = "Babywbx", email = "5620530+babywbx@users.noreply.github.com" },
 ]
+license = "Apache-2.0"
 requires-python = ">=3.12"
 dependencies = [
     "mcp[cli]>=1.26.0",

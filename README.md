@@ -305,4 +305,4 @@ uv run pytest -v
 
 ## 📄 许可
 
-MIT License © 2026 [Babywbx](https://github.com/babywbx)
+Apache-2.0 License © 2026 [Babywbx](https://github.com/babywbx)
