@@ -11,6 +11,10 @@ from superai_mcp.server import (
     _claude_prompt_args,
     _gemini_prompt_args,
     _summarize_line,
+    _usage,
+    _track_usage,
+    _reset_usage,
+    usage_tool,
 )
 
 
@@ -221,3 +225,73 @@ class TestBuildContextSystemPrompt:
         )
         assert result == "do stuff"
         assert "<system>" not in result
+
+
+class TestUsageTracking:
+    def setup_method(self) -> None:
+        _reset_usage()
+
+    def test_track_usage_basic(self) -> None:
+        _track_usage("codex", {"input_tokens": 100, "output_tokens": 50})
+        assert _usage["codex"]["calls"] == 1
+        assert _usage["codex"]["input_tokens"] == 100
+        assert _usage["codex"]["output_tokens"] == 50
+
+    def test_track_usage_accumulates(self) -> None:
+        _track_usage("codex", {"input_tokens": 100, "output_tokens": 50})
+        _track_usage("codex", {"input_tokens": 200, "output_tokens": 100})
+        assert _usage["codex"]["calls"] == 2
+        assert _usage["codex"]["input_tokens"] == 300
+        assert _usage["codex"]["output_tokens"] == 150
+
+    def test_track_usage_none(self) -> None:
+        _track_usage("codex", None)
+        assert _usage["codex"]["calls"] == 1
+        assert _usage["codex"]["input_tokens"] == 0
+
+    def test_track_usage_missing_keys(self) -> None:
+        _track_usage("gemini", {"some_other_stat": 42})
+        assert _usage["gemini"]["calls"] == 1
+        assert _usage["gemini"]["input_tokens"] == 0
+
+    def test_reset_usage(self) -> None:
+        _track_usage("codex", {"input_tokens": 100, "output_tokens": 50})
+        _reset_usage()
+        assert _usage["codex"]["calls"] == 0
+        assert _usage["codex"]["input_tokens"] == 0
+
+    def test_track_unknown_cli(self) -> None:
+        _track_usage("unknown_cli", {"input_tokens": 100})
+        # Should not crash, just silently ignore
+        assert "unknown_cli" not in _usage
+
+
+class TestUsageTool:
+    def setup_method(self) -> None:
+        _reset_usage()
+
+    async def test_empty_usage(self) -> None:
+        raw = await usage_tool()
+        result = json.loads(raw)
+        assert result["success"] is True
+        assert result["codex"]["calls"] == 0
+        assert result["total"]["calls"] == 0
+
+    async def test_usage_after_tracking(self) -> None:
+        _track_usage("codex", {"input_tokens": 100, "output_tokens": 50})
+        _track_usage("gemini", {"input_tokens": 200, "output_tokens": 80})
+        raw = await usage_tool()
+        result = json.loads(raw)
+        assert result["codex"]["calls"] == 1
+        assert result["codex"]["input_tokens"] == 100
+        assert result["gemini"]["calls"] == 1
+        assert result["total"]["calls"] == 2
+        assert result["total"]["input_tokens"] == 300
+        assert result["total"]["output_tokens"] == 130
+
+    async def test_usage_reset(self) -> None:
+        _track_usage("codex", {"input_tokens": 100, "output_tokens": 50})
+        raw = await usage_tool(reset=True)
+        result = json.loads(raw)
+        assert result["codex"]["calls"] == 1
+        assert _usage["codex"]["calls"] == 0

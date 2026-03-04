@@ -47,9 +47,38 @@ _CODEX_EFFORT_CHAIN = ("high", "medium", "low")
 _PROBE_PROMPT = "reply ok"
 _PROBE_TIMEOUT = 30.0
 
+# Timeout for status tool CLI probes
+_STATUS_TIMEOUT = 15.0
+
 # Prompt size threshold for switching from CLI arg to stdin piping.
 # Well under macOS ARG_MAX (~1MB) to leave room for env vars and other args.
 _STDIN_THRESHOLD = 200_000  # bytes
+
+# Cumulative usage tracking (in-memory only, resets on process restart)
+_usage: dict[str, dict[str, int]] = {}
+
+
+def _reset_usage() -> None:
+    """Reset all usage counters."""
+    for cli in ("codex", "gemini", "claude"):
+        _usage[cli] = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
+
+
+# Initialize on module load
+_reset_usage()
+
+
+def _track_usage(cli: str, usage: dict[str, object] | None) -> None:
+    """Accumulate usage stats for a CLI tool."""
+    if cli not in _usage:
+        return
+    _usage[cli]["calls"] += 1
+    if usage is None:
+        return
+    for key in ("input_tokens", "output_tokens"):
+        val = usage.get(key)
+        if isinstance(val, (int, float)):
+            _usage[cli][key] += int(val)
 
 
 def _gemini_prompt_args(prompt: str) -> tuple[list[str], bytes | None]:
@@ -330,6 +359,7 @@ async def codex_tool(
                 effective_prompt, call_fn=_call, resume_fn=_resume,
                 total_timeout=timeout,
             )
+            _track_usage("codex", parsed.usage)
             return parsed.model_dump_json(exclude_none=True)
 
         # Resume mode: pass session_id and prompt as positional args
@@ -428,6 +458,7 @@ async def codex_tool(
                 "content": f"codex exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
             })
 
+        _track_usage("codex", parsed.usage)
         return parsed.model_dump_json(exclude_none=True)
 
     except asyncio.TimeoutError:
@@ -536,6 +567,7 @@ async def gemini_tool(
                 effective_prompt, call_fn=_call, resume_fn=_resume,
                 total_timeout=timeout,
             )
+            _track_usage("gemini", parsed.usage)
             return parsed.model_dump_json(exclude_none=True)
 
         prompt_args, stdin_data = _gemini_prompt_args(effective_prompt)
@@ -580,6 +612,7 @@ async def gemini_tool(
                 "content": f"gemini exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
             })
 
+        _track_usage("gemini", parsed.usage)
         return parsed.model_dump_json(exclude_none=True)
 
     except asyncio.TimeoutError:
@@ -712,6 +745,7 @@ async def claude_tool(
                 effective_prompt, call_fn=_call, resume_fn=_resume,
                 total_timeout=timeout,
             )
+            _track_usage("claude", parsed.usage)
             return parsed.model_dump_json(exclude_none=True)
 
         prompt_args, stdin_data = _claude_prompt_args(effective_prompt)
@@ -791,6 +825,7 @@ async def claude_tool(
                 "content": f"claude exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
             })
 
+        _track_usage("claude", parsed.usage)
         return parsed.model_dump_json(exclude_none=True)
 
     except asyncio.TimeoutError:
@@ -916,6 +951,89 @@ async def list_models_tool(
         return json.dumps({"success": True, "count": len(models), "models": models})
     except Exception as exc:
         return _err(f"Failed to fetch models: {exc}")
+
+
+@mcp.tool(name="usage", annotations=ToolAnnotations(
+    readOnlyHint=True, destructiveHint=False, idempotentHint=True,
+))
+async def usage_tool(reset: bool = False) -> str:
+    """Show cumulative token usage and call counts across all CLI tools.
+
+    Returns per-CLI and total stats. Set reset=True to clear counters after reading.
+    """
+    total: dict[str, int] = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
+    for stats in _usage.values():
+        for key in total:
+            total[key] += stats[key]
+
+    result: dict[str, object] = {"success": True}
+    for cli in ("codex", "gemini", "claude"):
+        result[cli] = dict(_usage[cli])
+    result["total"] = total
+
+    if reset:
+        _reset_usage()
+
+    return json.dumps(result)
+
+
+async def _check_cli(name: str) -> dict[str, object]:
+    """Check a single CLI: available, version, authenticated."""
+    if not shutil.which(name):
+        return {"available": False, "version": None, "authenticated": False}
+
+    # Get version
+    version: str | None = None
+    try:
+        r = await run_cli(name, ["--version"], timeout=5.0)
+        if r.returncode == 0 and r.stdout_lines:
+            version = r.stdout_lines[0].strip()
+    except Exception:
+        pass
+
+    # Auth probe
+    authenticated = False
+    try:
+        if name == "codex":
+            args = ["exec", "--json", "--sandbox", "read-only", "--", _PROBE_PROMPT]
+            env = None
+        elif name == "gemini":
+            args = ["-p", _PROBE_PROMPT, "-o", "stream-json", "--sandbox"]
+            env = None
+        else:  # claude
+            args = ["-p", _PROBE_PROMPT, "--output-format", "json"]
+            env = _claude_env()
+
+        parsers: dict[str, Callable[[list[str]], CLIResult]] = {
+            "codex": parse_codex_output,
+            "gemini": parse_gemini_output,
+            "claude": parse_claude_output,
+        }
+        r = await run_cli(name, args, timeout=_STATUS_TIMEOUT, env=env)
+        parsed = parsers[name](r.stdout_lines)
+        authenticated = parsed.success
+    except Exception:
+        pass
+
+    return {"available": True, "version": version, "authenticated": authenticated}
+
+
+@mcp.tool(name="status", annotations=ToolAnnotations(
+    readOnlyHint=True, destructiveHint=False, idempotentHint=True,
+))
+async def status_tool() -> str:
+    """Check availability, version, and authentication status of all CLI tools."""
+    results = await asyncio.gather(
+        _check_cli("codex"),
+        _check_cli("gemini"),
+        _check_cli("claude"),
+    )
+    return json.dumps({
+        "success": True,
+        "codex": results[0],
+        "gemini": results[1],
+        "claude": results[2],
+    })
 
 
 def serve() -> None:
