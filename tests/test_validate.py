@@ -14,6 +14,7 @@ from superai_mcp.validate import (
     validate_reasoning_effort,
     validate_sandbox,
     validate_session_id,
+    validate_timeout,
 )
 
 
@@ -155,6 +156,25 @@ class TestValidateCommitSha:
     def test_path_injection(self) -> None:
         with pytest.raises(ValueError, match="invalid commit SHA"):
             validate_commit_sha("../../../etc/passwd")
+
+
+class TestValidateTimeout:
+    def test_valid_positive(self) -> None:
+        assert validate_timeout(300.0) == 300.0
+
+    def test_valid_small(self) -> None:
+        assert validate_timeout(1.0) == 1.0
+
+    def test_valid_large(self) -> None:
+        assert validate_timeout(9999.0) == 9999.0
+
+    def test_zero(self) -> None:
+        with pytest.raises(ValueError, match="must be > 0"):
+            validate_timeout(0.0)
+
+    def test_negative(self) -> None:
+        with pytest.raises(ValueError, match="must be > 0"):
+            validate_timeout(-1.0)
 
 
 class TestValidateFiles:

@@ -79,6 +79,13 @@ def validate_commit_sha(sha: str) -> str:
     return sha
 
 
+def validate_timeout(timeout: float) -> float:
+    """Validate timeout is positive."""
+    if timeout <= 0:
+        raise ValueError(f"invalid timeout: {timeout}, must be > 0")
+    return timeout
+
+
 def validate_files(files: list[str] | None) -> list[str] | None:
     """Validate file list size."""
     if files and len(files) > MAX_FILES:
