@@ -59,10 +59,12 @@ _MAX_DEPTH = 5
 _DEPTH_ENV = "SUPERAI_MCP_DEPTH"
 
 
-def _get_depth() -> int:
+def _get_depth(env: dict[str, str] | None = None) -> int:
     """Get current nesting depth from environment."""
+    source = env if env is not None else os.environ
     try:
-        return int(os.environ.get(_DEPTH_ENV, "0"))
+        val = int(source.get(_DEPTH_ENV, "0"))
+        return max(0, val)  # clamp negatives to 0
     except (ValueError, TypeError):
         return 0
 
@@ -70,7 +72,7 @@ def _get_depth() -> int:
 def _child_env(base: dict[str, str] | None = None) -> dict[str, str]:
     """Build child process env with incremented nesting depth."""
     env = dict(base if base is not None else os.environ)
-    env[_DEPTH_ENV] = str(_get_depth() + 1)
+    env[_DEPTH_ENV] = str(_get_depth(env) + 1)
     return env
 
 # Cumulative usage tracking (in-memory only, resets on process restart)

@@ -434,5 +434,17 @@ class TestNestingDepth:
         assert env["FOO"] == "bar"
         assert _DEPTH_ENV in env
 
+    def test_child_env_reads_base_depth(self) -> None:
+        """_child_env should read depth from base dict, not os.environ."""
+        base = {_DEPTH_ENV: "4"}
+        env = _child_env(base)
+        assert env[_DEPTH_ENV] == "5"
+
+    def test_get_depth_negative_clamped(self) -> None:
+        assert _get_depth({_DEPTH_ENV: "-10"}) == 0
+
+    def test_get_depth_from_dict(self) -> None:
+        assert _get_depth({_DEPTH_ENV: "3"}) == 3
+
     def test_max_depth_default(self) -> None:
         assert _MAX_DEPTH == 5
