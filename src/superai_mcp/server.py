@@ -15,7 +15,7 @@ from superai_mcp.openrouter import check_model, fetch_models
 from superai_mcp.models import CLIResult, Sandbox
 from superai_mcp.parsers import (
     is_rate_limited,
-    parse_claude_output,
+    parse_claude_stream_output,
     parse_codex_output,
     parse_gemini_output,
 )
@@ -196,6 +196,26 @@ def _summarize_line(line: str) -> str:
             if item_type in ("agent_message", "message") and text:
                 return f"message: {text}"[:_MAX_SNIPPET]
         return event_type[:_MAX_SNIPPET]
+
+    # Claude stream-json events
+    if event_type == "system":
+        subtype = obj.get("subtype", "")
+        if subtype == "init":
+            model_name = obj.get("model", "")
+            return f"system.init: {model_name}"[:_MAX_SNIPPET] if model_name else "system.init"
+        return f"system: {subtype}"[:_MAX_SNIPPET] if subtype else "system"
+
+    if event_type == "assistant":
+        msg = obj.get("message")
+        if isinstance(msg, dict):
+            blocks = msg.get("content", [])
+            if isinstance(blocks, list):
+                for block in blocks:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text = block.get("text", "")
+                        if text:
+                            return f"assistant: {text}"[:_MAX_SNIPPET]
+        return "assistant"
 
     # Gemini stream-json events
     if "role" in obj and obj.get("role") == "assistant":
@@ -764,7 +784,7 @@ async def claude_tool(
 
             async def _call(p: str, timeout: float) -> CLIResult:
                 prompt_args, stdin_data = _claude_prompt_args(p)
-                a = prompt_args + ["--output-format", "json"]
+                a = prompt_args + ["--output-format", "stream-json", "--verbose"]
                 if model:
                     a.extend(["--model", model])
                 if effort:
@@ -775,14 +795,14 @@ async def claude_tool(
                     timeout=timeout,
                     on_progress=_make_progress_cb(ctx, "claude", timeout),
                 )
-                parsed = parse_claude_output(r.stdout_lines)
+                parsed = parse_claude_stream_output(r.stdout_lines)
                 if not parsed.model:
                     parsed = parsed.model_copy(update={"model": model or None})
                 return parsed
 
             async def _resume(p: str, sid: str, timeout: float) -> CLIResult:
                 prompt_args, stdin_data = _claude_prompt_args(p)
-                a = prompt_args + ["--output-format", "json", "--resume", sid]
+                a = prompt_args + ["--output-format", "stream-json", "--verbose", "--resume", sid]
                 if model:
                     a.extend(["--model", model])
                 if effort:
@@ -793,7 +813,7 @@ async def claude_tool(
                     timeout=timeout,
                     on_progress=_make_progress_cb(ctx, "claude", timeout),
                 )
-                parsed = parse_claude_output(r.stdout_lines)
+                parsed = parse_claude_stream_output(r.stdout_lines)
                 if not parsed.model:
                     parsed = parsed.model_copy(update={"model": model or None})
                 return parsed
@@ -806,7 +826,7 @@ async def claude_tool(
             return parsed.model_dump_json(exclude_none=True)
 
         prompt_args, stdin_data = _claude_prompt_args(effective_prompt)
-        args = prompt_args + ["--output-format", "json"]
+        args = prompt_args + ["--output-format", "stream-json", "--verbose"]
 
         if session_id:
             args.extend(["--resume", session_id])
@@ -824,7 +844,7 @@ async def claude_tool(
             "claude", args, cwd=cd, env=env, stdin_data=stdin_data,
             on_progress=progress_cb, timeout=timeout,
         )
-        parsed = parse_claude_output(result.stdout_lines, return_all=return_all_messages)
+        parsed = parse_claude_stream_output(result.stdout_lines, return_all=return_all_messages)
         if not parsed.model:
             parsed = parsed.model_copy(update={"model": model or None})
 
@@ -838,13 +858,13 @@ async def claude_tool(
                     break
             for fallback_model in _CLAUDE_FALLBACK_CHAIN[start:]:
                 # Probe: short test to verify fallback model is reachable
-                probe_args = ["-p", _PROBE_PROMPT, "--output-format", "json",
+                probe_args = ["-p", _PROBE_PROMPT, "--output-format", "stream-json", "--verbose",
                               "--model", fallback_model]
                 probe_args.extend(sandbox_args)
                 probe_result = await run_cli(
                     "claude", probe_args, cwd=cd, env=env, timeout=_PROBE_TIMEOUT,
                 )
-                probe_parsed = parse_claude_output(probe_result.stdout_lines)
+                probe_parsed = parse_claude_stream_output(probe_result.stdout_lines)
                 if not probe_parsed.success:
                     if is_rate_limited(probe_parsed):
                         continue  # this level also rate-limited, try next
@@ -854,7 +874,7 @@ async def claude_tool(
                     effective_prompt,
                 )
                 retry_args = retry_prompt_args + [
-                    "--output-format", "json", "--model", fallback_model,
+                    "--output-format", "stream-json", "--verbose", "--model", fallback_model,
                 ]
                 if effort:
                     retry_args.extend(["--effort", effort])
@@ -865,7 +885,7 @@ async def claude_tool(
                     "claude", retry_args, cwd=cd, env=env, stdin_data=retry_stdin,
                     on_progress=progress_cb, timeout=timeout,
                 )
-                parsed = parse_claude_output(
+                parsed = parse_claude_stream_output(
                     retry_result.stdout_lines, return_all=return_all_messages,
                 )
                 if parsed.success:
@@ -1409,13 +1429,13 @@ async def _check_cli(name: str) -> dict[str, object]:
             args = ["-p", _PROBE_PROMPT, "-o", "stream-json", "--sandbox"]
             env = None
         else:  # claude
-            args = ["-p", _PROBE_PROMPT, "--output-format", "json"]
+            args = ["-p", _PROBE_PROMPT, "--output-format", "stream-json", "--verbose"]
             env = _claude_env()
 
         parsers: dict[str, Callable[[list[str]], CLIResult]] = {
             "codex": parse_codex_output,
             "gemini": parse_gemini_output,
-            "claude": parse_claude_output,
+            "claude": parse_claude_stream_output,
         }
         r = await run_cli(name, args, timeout=_STATUS_TIMEOUT, env=env)
         parsed = parsers[name](r.stdout_lines)

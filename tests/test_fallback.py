@@ -28,7 +28,12 @@ def _gemini_quota_lines() -> list[str]:
 
 
 def _claude_lines(content: str) -> list[str]:
-    return [json.dumps({"session_id": "c-001", "usage": {"input_tokens": 10}, "result": content})]
+    """Build Claude stream-json output lines."""
+    return [
+        '{"type":"system","subtype":"init","session_id":"c-001"}',
+        json.dumps({"type": "result", "subtype": "success", "result": content,
+                     "usage": {"input_tokens": 10}}),
+    ]
 
 
 def _claude_rate_limit_lines() -> list[str]:

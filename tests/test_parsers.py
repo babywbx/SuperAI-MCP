@@ -4,6 +4,7 @@ from superai_mcp.parsers import (
     is_quota_exhausted,
     is_rate_limited,
     parse_claude_output,
+    parse_claude_stream_output,
     parse_codex_output,
     parse_gemini_output,
 )
@@ -117,6 +118,151 @@ class TestClaudeParser:
         r = parse_claude_output(lines)
         assert r.success is True
         assert r.model == "claude-sonnet-4-6"
+
+
+CLAUDE_STREAM_LINES = [
+    '{"type":"system","subtype":"init","session_id":"cs-123","model":"claude-sonnet-4-6"}',
+    '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello from stream"}]}}',
+    '{"type":"result","subtype":"success","result":"Final answer","usage":{"input_tokens":300,"output_tokens":30},"model":"claude-sonnet-4-6"}',
+]
+
+
+class TestClaudeStreamParser:
+    def test_basic(self) -> None:
+        r = parse_claude_stream_output(CLAUDE_STREAM_LINES)
+        assert r.success is True
+        assert r.session_id == "cs-123"
+        assert r.content == "Final answer"
+        assert r.model == "claude-sonnet-4-6"
+        assert r.usage is not None
+        assert r.usage["input_tokens"] == 300
+        assert r.all_messages is None
+
+    def test_return_all(self) -> None:
+        r = parse_claude_stream_output(CLAUDE_STREAM_LINES, return_all=True)
+        assert r.all_messages is not None
+        assert len(r.all_messages) == 3
+        assert r.all_messages[2]["type"] == "result"
+
+    def test_empty(self) -> None:
+        r = parse_claude_stream_output([])
+        assert r.success is False
+        assert r.content == "(no output)"
+        assert r.session_id is None
+
+    def test_model_from_result(self) -> None:
+        """Model in result event overrides init model."""
+        lines = [
+            '{"type":"system","subtype":"init","session_id":"s","model":"init-model"}',
+            '{"type":"result","subtype":"success","result":"ok","model":"result-model"}',
+        ]
+        r = parse_claude_stream_output(lines)
+        assert r.model == "result-model"
+
+    def test_result_overrides_chunks(self) -> None:
+        """result.result field takes priority over accumulated assistant chunks."""
+        lines = [
+            '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"intermediate"}]}}',
+            '{"type":"result","subtype":"success","result":"final"}',
+        ]
+        r = parse_claude_stream_output(lines)
+        assert r.content == "final"
+
+    def test_tool_use_clears_chunks(self) -> None:
+        """tool_use/tool_result events clear accumulated chunks."""
+        lines = [
+            '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"before tools"}]}}',
+            '{"type":"tool_use","name":"read_file"}',
+            '{"type":"tool_result"}',
+            '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"after tools"}]}}',
+            '{"type":"result","subtype":"success","result":"after tools"}',
+        ]
+        r = parse_claude_stream_output(lines)
+        assert r.content == "after tools"
+        assert "before tools" not in r.content
+
+    def test_tool_use_preserves_chunks_with_return_all(self) -> None:
+        """With return_all, chunks are NOT cleared by tool events."""
+        lines = [
+            '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"before"}]}}',
+            '{"type":"tool_use","name":"read_file"}',
+            '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" after"}]}}',
+            '{"type":"result","subtype":"success","result":"final"}',
+        ]
+        r = parse_claude_stream_output(lines, return_all=True)
+        # result.result still overrides
+        assert r.content == "final"
+        assert r.all_messages is not None
+        assert len(r.all_messages) == 4
+
+    def test_error_result(self) -> None:
+        lines = [
+            '{"type":"system","subtype":"init","session_id":"e"}',
+            '{"type":"result","subtype":"error","result":"Something went wrong"}',
+        ]
+        r = parse_claude_stream_output(lines)
+        assert r.success is False
+        assert r.content == "Something went wrong"
+
+    def test_no_result_event(self) -> None:
+        """Without a result event, assistant chunks are the content."""
+        lines = [
+            '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"partial"}]}}',
+        ]
+        r = parse_claude_stream_output(lines)
+        assert r.success is False  # no result event → success stays False
+        assert r.content == "partial"
+
+    def test_no_auth(self) -> None:
+        lines = [
+            "Error: Not authenticated. Please run claude login.",
+        ]
+        r = parse_claude_stream_output(lines)
+        assert r.success is False
+        assert "authenticated" in r.content
+
+    def test_warning_before_json(self) -> None:
+        lines = [
+            "Warning: some deprecation notice",
+            '{"type":"system","subtype":"init","session_id":"w"}',
+            '{"type":"result","subtype":"success","result":"OK"}',
+        ]
+        r = parse_claude_stream_output(lines)
+        assert r.success is True
+        assert r.content == "OK"
+
+    def test_malformed_json(self) -> None:
+        lines = ["{broken json}"]
+        r = parse_claude_stream_output(lines)
+        assert r.success is False
+        assert r.content == "{broken json}"
+
+    def test_missing_session_id(self) -> None:
+        lines = [
+            '{"type":"system","subtype":"init"}',
+            '{"type":"result","subtype":"success","result":"hi"}',
+        ]
+        r = parse_claude_stream_output(lines)
+        assert r.success is True
+        assert r.session_id is None
+
+    def test_multiple_text_blocks(self) -> None:
+        """Multiple text blocks in a single assistant message."""
+        lines = [
+            '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello "},{"type":"text","text":"World"}]}}',
+            '{"type":"result","subtype":"success","result":"Hello World"}',
+        ]
+        r = parse_claude_stream_output(lines)
+        assert r.content == "Hello World"
+
+    def test_usage(self) -> None:
+        lines = [
+            '{"type":"result","subtype":"success","result":"ok","usage":{"input_tokens":50,"output_tokens":10}}',
+        ]
+        r = parse_claude_stream_output(lines)
+        assert r.usage is not None
+        assert r.usage["input_tokens"] == 50
+        assert r.usage["output_tokens"] == 10
 
 
 class TestCodexParser:

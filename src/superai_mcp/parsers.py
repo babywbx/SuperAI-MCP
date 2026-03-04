@@ -179,6 +179,106 @@ def parse_claude_output(
     )
 
 
+def parse_claude_stream_output(
+    lines: list[str],
+    *,
+    return_all: bool = False,
+) -> CLIResult:
+    """Parse Claude `--output-format stream-json` NDJSON output into CLIResult.
+
+    Event types handled:
+      system (subtype: init) -> session_id, model
+      assistant               -> message.content[].text
+      tool_use / tool_result  -> clear accumulated chunks (keep final answer only)
+      result                  -> final answer, usage, model (highest priority)
+
+    Non-JSON lines are captured as error text.
+    """
+    session_id: str | None = None
+    model: str | None = None
+    chunks: list[str] = []
+    plain_lines: list[str] = []
+    usage: dict[str, object] | None = None
+    success = False
+    all_events: list[dict[str, object]] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        event = _parse_json_object(stripped)
+        if event is None:
+            plain_lines.append(stripped)
+            continue
+
+        if return_all:
+            all_events.append(event)
+
+        etype = event.get("type")
+
+        if etype == "system":
+            subtype = event.get("subtype")
+            if subtype == "init":
+                sid = event.get("session_id")
+                session_id = str(sid) if sid else None
+                raw_model = event.get("model")
+                if isinstance(raw_model, str) and raw_model:
+                    model = raw_model
+
+        elif etype == "assistant":
+            msg = event.get("message")
+            if isinstance(msg, dict):
+                content_blocks = msg.get("content", [])
+                if isinstance(content_blocks, list):
+                    for block in content_blocks:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text = block.get("text", "")
+                            if isinstance(text, str) and text:
+                                chunks.append(text)
+
+        elif etype in ("tool_use", "tool_result"):
+            if not return_all:
+                chunks.clear()
+
+        elif etype == "result":
+            subtype = event.get("subtype")
+            success = subtype == "success"
+            # result.result is the authoritative final answer
+            result_text = event.get("result")
+            if isinstance(result_text, str) and result_text:
+                chunks.clear()
+                chunks.append(result_text)
+            raw_usage = event.get("usage")
+            if isinstance(raw_usage, dict):
+                usage = raw_usage
+            # Model from result event has highest priority
+            raw_model = event.get("model")
+            if isinstance(raw_model, str) and raw_model:
+                model = raw_model
+
+    content = "".join(chunks)
+    if content:
+        return CLIResult(
+            success=success,
+            session_id=session_id,
+            content=content,
+            model=model,
+            all_messages=all_events if return_all else None,
+            usage=usage,
+        )
+
+    # No assistant output — report plain text errors or "(no output)"
+    error_text = "\n".join(plain_lines) if plain_lines else "(no output)"
+    return CLIResult(
+        success=False,
+        session_id=session_id,
+        content=error_text,
+        model=model,
+        all_messages=all_events if return_all else None,
+        usage=usage,
+    )
+
+
 _RATE_LIMIT_PATTERNS = (
     "RESOURCE_EXHAUSTED",   # Gemini
     "overloaded_error",     # Claude

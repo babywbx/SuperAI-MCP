@@ -102,6 +102,41 @@ class TestSummarizeLine:
         })
         assert _summarize_line(line) == "item.completed"
 
+    # -- Claude stream-json events --
+
+    def test_claude_system_init(self) -> None:
+        line = json.dumps({"type": "system", "subtype": "init", "model": "claude-sonnet-4-6"})
+        assert _summarize_line(line) == "system.init: claude-sonnet-4-6"
+
+    def test_claude_system_init_no_model(self) -> None:
+        line = json.dumps({"type": "system", "subtype": "init"})
+        assert _summarize_line(line) == "system.init"
+
+    def test_claude_system_no_subtype(self) -> None:
+        line = json.dumps({"type": "system"})
+        assert _summarize_line(line) == "system"
+
+    def test_claude_assistant_message(self) -> None:
+        line = json.dumps({
+            "type": "assistant",
+            "message": {"role": "assistant", "content": [{"type": "text", "text": "Hello world"}]},
+        })
+        assert _summarize_line(line) == "assistant: Hello world"
+
+    def test_claude_assistant_no_content(self) -> None:
+        line = json.dumps({"type": "assistant", "message": {"role": "assistant", "content": []}})
+        assert _summarize_line(line) == "assistant"
+
+    def test_claude_assistant_truncation(self) -> None:
+        long_text = "c" * 200
+        line = json.dumps({
+            "type": "assistant",
+            "message": {"role": "assistant", "content": [{"type": "text", "text": long_text}]},
+        })
+        result = _summarize_line(line)
+        assert len(result) == _MAX_SNIPPET
+        assert result.startswith("assistant: ")
+
     # -- Gemini events --
 
     def test_gemini_assistant_message(self) -> None:

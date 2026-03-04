@@ -11,15 +11,15 @@ _PROGRESS_INTERVAL = 5.0
 _GRACE_OUTPUT = 30.0
 # Grace period when output contains keywords signaling active generation
 _GRACE_KEYWORD = 120.0
-# Keywords in stdout that signal active generation (case-insensitive check)
 # Keywords that signal CLI is in its final output phase (strict).
 # Only matched against the LAST stdout line (lowercased).
 # Codex:  "agent_message" appears in item.completed when outputting the final answer.
 # Gemini: after tool cycles, assistant delta messages are the final answer.
-# Claude: single JSON blob, no intermediate events — relies on new-output grace only.
+# Claude: stream-json emits "type":"assistant" events during final answer output.
 _GRACE_KEYWORDS = frozenset((
     "agent_message",         # Codex: final answer item
     '"role":"assistant"',    # Gemini: assistant is speaking (final answer after tool cycles)
+    '"type":"assistant"',    # Claude: stream-json assistant event
 ))
 
 
