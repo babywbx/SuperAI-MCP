@@ -193,6 +193,7 @@ Broadcast the same prompt to multiple CLIs in parallel, returning aggregated res
 | `targets` | list[str] | `None` | Target CLIs, empty=all (`codex`, `gemini`, `claude`) |
 | `model` | str | `""` | Model name passed to all CLIs (global override) |
 | `models` | dict[str,str] | `None` | Per-CLI model override, e.g. `{"gemini": "gemini-3.1-pro-preview"}` |
+| `overrides` | dict[str,dict] | `None` | Per-CLI parameter overrides (see below) |
 | `review_uncommitted` | bool | `False` | Review uncommitted changes |
 | `review_base` | str | `""` | Review changes vs a branch |
 | `review_commit` | str | `""` | Review specific commit (7-40 hex SHA) |
@@ -200,6 +201,20 @@ Broadcast the same prompt to multiple CLIs in parallel, returning aggregated res
 | `return_all_messages` | bool | `False` | Return full event stream |
 | `system_prompt` | str | `""` | System-level instruction (injected as `<system>` tag) |
 | `timeout` | float | `300` | Timeout in seconds |
+
+**Per-target overrides**: Use `overrides` to set any tool parameter individually per CLI target. Top-level parameters serve as defaults; `overrides` values take precedence. Priority for model: `overrides` > `models` > `model`.
+
+```json
+{
+  "overrides": {
+    "codex": {"timeout": 600, "reasoning_effort": "high"},
+    "gemini": {"timeout": 120, "system_prompt": "be concise"},
+    "claude": {"timeout": 900, "effort": "high", "max_budget_usd": 5.0}
+  }
+}
+```
+
+> **Note**: Context-building parameters (`review_uncommitted`, `review_base`, `review_commit`, `files`) are pre-built once and cannot be overridden per-target.
 
 ### `chain`
 

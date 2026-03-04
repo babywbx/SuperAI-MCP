@@ -193,6 +193,7 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `targets` | list[str] | `None` | 目标 CLI 列表，空=全部 (`codex`, `gemini`, `claude`) |
 | `model` | str | `""` | 传给所有 CLI 的模型名 (全局覆盖) |
 | `models` | dict[str,str] | `None` | 按 CLI 指定模型，如 `{"gemini": "gemini-3.1-pro-preview"}` |
+| `overrides` | dict[str,dict] | `None` | 按 CLI 覆盖任意参数 (见下方) |
 | `review_uncommitted` | bool | `False` | 审查未提交更改 |
 | `review_base` | str | `""` | 审查相对于某分支的更改 |
 | `review_commit` | str | `""` | 审查特定 commit (7-40 位 hex SHA) |
@@ -200,6 +201,20 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `return_all_messages` | bool | `False` | 返回完整事件流 |
 | `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
 | `timeout` | float | `300` | 超时秒数 |
+
+**按目标覆盖参数**：使用 `overrides` 为每个 CLI 单独设置任意参数。顶层参数作为默认值，`overrides` 中的值优先。模型优先级：`overrides` > `models` > `model`。
+
+```json
+{
+  "overrides": {
+    "codex": {"timeout": 600, "reasoning_effort": "high"},
+    "gemini": {"timeout": 120, "system_prompt": "be concise"},
+    "claude": {"timeout": 900, "effort": "high", "max_budget_usd": 5.0}
+  }
+}
+```
+
+> **注意**：上下文构建参数（`review_uncommitted`、`review_base`、`review_commit`、`files`）预构建一次，不支持按目标覆盖。
 
 ### `chain`
 

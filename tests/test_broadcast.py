@@ -185,6 +185,16 @@ class TestResultsStructure:
         assert call_kwargs["files"] is None
 
     @pytest.mark.usefixtures("_mock_tools")
+    async def test_system_prompt_passed_per_target(self, _mock_tools: dict) -> None:
+        """system_prompt is forwarded to each target (not pre-baked into context)."""
+        await broadcast_tool(
+            prompt="test", cd="/tmp", targets=["codex"],
+            system_prompt="be concise",
+        )
+        call_kwargs = _mock_tools["codex"].call_args.kwargs
+        assert call_kwargs["system_prompt"] == "be concise"
+
+    @pytest.mark.usefixtures("_mock_tools")
     async def test_kwargs_forwarded(self, _mock_tools: dict) -> None:
         """Common kwargs are forwarded to tool functions."""
         await broadcast_tool(
@@ -233,6 +243,140 @@ class TestPerTargetModels:
         result = json.loads(raw)
         assert result["success"] is False
         assert "invalid models key" in result["content"]
+
+
+class TestPerTargetOverrides:
+    @pytest.mark.usefixtures("_mock_tools")
+    async def test_override_timeout(self, _mock_tools: dict) -> None:
+        """Per-target timeout override via overrides dict."""
+        await broadcast_tool(
+            prompt="test", cd="/tmp", targets=["codex", "claude"],
+            timeout=300.0,
+            overrides={"codex": {"timeout": 600.0}},
+        )
+        codex_kwargs = _mock_tools["codex"].call_args.kwargs
+        claude_kwargs = _mock_tools["claude"].call_args.kwargs
+        assert codex_kwargs["timeout"] == 600.0
+        assert claude_kwargs["timeout"] == 300.0
+
+    @pytest.mark.usefixtures("_mock_tools")
+    async def test_override_system_prompt(self, _mock_tools: dict) -> None:
+        """Per-target system_prompt override."""
+        await broadcast_tool(
+            prompt="test", cd="/tmp", targets=["codex", "gemini"],
+            system_prompt="default prompt",
+            overrides={"gemini": {"system_prompt": "gemini specific"}},
+        )
+        codex_kwargs = _mock_tools["codex"].call_args.kwargs
+        gemini_kwargs = _mock_tools["gemini"].call_args.kwargs
+        assert codex_kwargs["system_prompt"] == "default prompt"
+        assert gemini_kwargs["system_prompt"] == "gemini specific"
+
+    @pytest.mark.usefixtures("_mock_tools")
+    async def test_override_model_priority(self, _mock_tools: dict) -> None:
+        """overrides.model > models dict > global model."""
+        await broadcast_tool(
+            prompt="test", cd="/tmp", targets=["codex", "gemini", "claude"],
+            model="global",
+            models={"gemini": "from-models"},
+            overrides={"claude": {"model": "from-overrides"}},
+        )
+        codex_kwargs = _mock_tools["codex"].call_args.kwargs
+        gemini_kwargs = _mock_tools["gemini"].call_args.kwargs
+        claude_kwargs = _mock_tools["claude"].call_args.kwargs
+        assert codex_kwargs["model"] == "global"
+        assert gemini_kwargs["model"] == "from-models"
+        assert claude_kwargs["model"] == "from-overrides"
+
+    @pytest.mark.usefixtures("_mock_tools")
+    async def test_override_model_beats_models_dict(self, _mock_tools: dict) -> None:
+        """overrides.model takes precedence over models dict for same target."""
+        await broadcast_tool(
+            prompt="test", cd="/tmp", targets=["codex"],
+            models={"codex": "from-models"},
+            overrides={"codex": {"model": "from-overrides"}},
+        )
+        codex_kwargs = _mock_tools["codex"].call_args.kwargs
+        assert codex_kwargs["model"] == "from-overrides"
+
+    @pytest.mark.usefixtures("_mock_tools")
+    async def test_override_target_specific_params(self, _mock_tools: dict) -> None:
+        """Target-specific params like effort (claude) via overrides."""
+        await broadcast_tool(
+            prompt="test", cd="/tmp", targets=["claude"],
+            overrides={"claude": {"effort": "high", "max_budget_usd": 5.0}},
+        )
+        claude_kwargs = _mock_tools["claude"].call_args.kwargs
+        assert claude_kwargs["effort"] == "high"
+        assert claude_kwargs["max_budget_usd"] == 5.0
+
+    @pytest.mark.usefixtures("_mock_tools")
+    async def test_override_multiple_targets(self, _mock_tools: dict) -> None:
+        """Different overrides for different targets."""
+        await broadcast_tool(
+            prompt="test", cd="/tmp",
+            overrides={
+                "codex": {"timeout": 120.0, "reasoning_effort": "high"},
+                "gemini": {"timeout": 60.0},
+                "claude": {"timeout": 900.0, "effort": "high"},
+            },
+        )
+        codex_kwargs = _mock_tools["codex"].call_args.kwargs
+        gemini_kwargs = _mock_tools["gemini"].call_args.kwargs
+        claude_kwargs = _mock_tools["claude"].call_args.kwargs
+        assert codex_kwargs["timeout"] == 120.0
+        assert codex_kwargs["reasoning_effort"] == "high"
+        assert gemini_kwargs["timeout"] == 60.0
+        assert claude_kwargs["timeout"] == 900.0
+        assert claude_kwargs["effort"] == "high"
+
+    @pytest.mark.usefixtures("_mock_tools")
+    async def test_blocked_keys_ignored(self, _mock_tools: dict) -> None:
+        """Pre-built context params in overrides are silently ignored."""
+        await broadcast_tool(
+            prompt="test", cd="/tmp", targets=["codex"],
+            overrides={"codex": {
+                "review_uncommitted": True,
+                "files": ["hack.py"],
+                "timeout": 999.0,
+            }},
+        )
+        codex_kwargs = _mock_tools["codex"].call_args.kwargs
+        # Blocked keys stay at their pre-built values
+        assert codex_kwargs["review_uncommitted"] is False
+        assert codex_kwargs["files"] is None
+        # Non-blocked key is applied
+        assert codex_kwargs["timeout"] == 999.0
+
+    async def test_invalid_overrides_key(self) -> None:
+        """Invalid target key in overrides returns error."""
+        raw = await broadcast_tool(
+            prompt="test", cd="/tmp",
+            overrides={"gpt5": {"timeout": 100}},
+        )
+        result = json.loads(raw)
+        assert result["success"] is False
+        assert "invalid overrides key" in result["content"]
+
+    @pytest.mark.usefixtures("_mock_tools")
+    async def test_empty_overrides_no_effect(self, _mock_tools: dict) -> None:
+        """Empty overrides dict has no effect."""
+        await broadcast_tool(
+            prompt="test", cd="/tmp", targets=["codex"],
+            timeout=300.0, overrides={},
+        )
+        codex_kwargs = _mock_tools["codex"].call_args.kwargs
+        assert codex_kwargs["timeout"] == 300.0
+
+    @pytest.mark.usefixtures("_mock_tools")
+    async def test_none_overrides_no_effect(self, _mock_tools: dict) -> None:
+        """None overrides has no effect (default)."""
+        await broadcast_tool(
+            prompt="test", cd="/tmp", targets=["codex"],
+            timeout=300.0,
+        )
+        codex_kwargs = _mock_tools["codex"].call_args.kwargs
+        assert codex_kwargs["timeout"] == 300.0
 
 
 class TestBroadcastValidatesFiles:

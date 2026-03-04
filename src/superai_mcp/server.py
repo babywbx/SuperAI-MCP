@@ -946,6 +946,7 @@ async def broadcast_tool(
     targets: list[str] | None = None,
     model: str = "",
     models: dict[str, str] | None = None,
+    overrides: dict[str, dict[str, object]] | None = None,
     review_uncommitted: bool = False,
     review_base: str = "",
     review_commit: str = "",
@@ -958,6 +959,12 @@ async def broadcast_tool(
 
     Sends the prompt concurrently to the specified targets (or all if empty)
     and returns aggregated results. Useful for comparing answers across models.
+
+    Per-target overrides: use ``overrides`` to set any parameter per target.
+    Example: ``overrides={"codex": {"timeout": 600}, "claude": {"effort": "high"}}``
+    Priority: overrides > models > global defaults.
+    Pre-built context params (review_uncommitted, review_base, review_commit,
+    files) cannot be overridden per-target.
     """
     effective_targets = list(_ALL_TARGETS) if not targets else targets
 
@@ -975,7 +982,8 @@ async def broadcast_tool(
     if invalid:
         return _err(f"invalid target(s): {', '.join(invalid)}. valid: {', '.join(_ALL_TARGETS)}")
 
-    # Pre-build context once to avoid repeated git diff / file reads
+    # Pre-build context once to avoid repeated git diff / file reads.
+    # system_prompt is NOT baked in here — it's passed per-target so overrides work.
     try:
         validate_cd(cd)
         validate_commit_sha(review_commit)
@@ -987,7 +995,7 @@ async def broadcast_tool(
             review_base=review_base,
             review_commit=review_commit,
             files=files,
-            system_prompt=system_prompt,
+            system_prompt="",
         )
     except ValueError as e:
         return _err(str(e))
@@ -997,6 +1005,18 @@ async def broadcast_tool(
         invalid_keys = [k for k in models if k not in _ALL_TARGETS]
         if invalid_keys:
             return _err(f"invalid models key(s): {', '.join(invalid_keys)}. valid: {', '.join(_ALL_TARGETS)}")
+
+    # Validate per-target override keys
+    if overrides:
+        invalid_keys = [k for k in overrides if k not in _ALL_TARGETS]
+        if invalid_keys:
+            return _err(f"invalid overrides key(s): {', '.join(invalid_keys)}. valid: {', '.join(_ALL_TARGETS)}")
+
+    # Params that are pre-built into context and must not be overridden per-target
+    _BLOCKED_OVERRIDE_KEYS = frozenset({
+        "prompt", "cd", "ctx",
+        "review_uncommitted", "review_base", "review_commit", "files",
+    })
 
     # Forward pre-built prompt; disable review/files so tools don't redo the work
     base_kwargs: dict[str, object] = {
@@ -1008,15 +1028,27 @@ async def broadcast_tool(
         "review_commit": "",
         "files": None,
         "return_all_messages": return_all_messages,
-        "system_prompt": "",
+        "system_prompt": system_prompt,
         "timeout": timeout,
     }
 
     async def _call(target: str) -> tuple[str, object]:
         fn = _TARGET_FNS[target]
-        # Per-target model override takes precedence over global model
-        target_model = (models or {}).get(target, model)
-        kwargs = {**base_kwargs, "model": target_model}
+        # Start with base kwargs
+        kwargs = {**base_kwargs}
+        # Per-target model: overrides dict > models dict > global model
+        target_model = model
+        if models and target in models:
+            target_model = models[target]
+        if overrides and target in overrides and "model" in overrides[target]:
+            target_model = str(overrides[target]["model"])
+        kwargs["model"] = target_model
+        # Apply remaining per-target overrides (skip blocked keys and model)
+        if overrides and target in overrides:
+            for k, v in overrides[target].items():
+                if k in _BLOCKED_OVERRIDE_KEYS or k == "model":
+                    continue
+                kwargs[k] = v
         try:
             raw = await fn(**kwargs)  # type: ignore[arg-type]
             return target, json.loads(raw)
