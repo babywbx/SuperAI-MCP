@@ -319,9 +319,8 @@ async def codex_tool(
 
         env = _child_env()
 
-        model_err = await check_model(model, "codex")
-        if model_err:
-            return _err(model_err)
+        # Advisory only — don't block, append hint if CLI fails later
+        model_warning = await check_model(model, "codex")
 
         if auto_split and session_id:
             return _err("auto_split and session_id are mutually exclusive")
@@ -485,9 +484,10 @@ async def codex_tool(
                     break  # different error, stop
                 # still rate-limited — continue to next tier
         elif result.returncode != 0 and not parsed.success:
-            parsed = parsed.model_copy(update={
-                "content": f"codex exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
-            })
+            msg = f"codex exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
+            if model_warning:
+                msg = f"{msg} (hint: {model_warning})"
+            parsed = parsed.model_copy(update={"content": msg})
 
         _track_usage("codex", parsed.usage)
         return parsed.model_dump_json(exclude_none=True)
@@ -545,9 +545,8 @@ async def gemini_tool(
 
         env = _child_env()
 
-        model_err = await check_model(model, "gemini")
-        if model_err:
-            return _err(model_err)
+        # Advisory only — don't block, append hint if CLI fails later
+        model_warning = await check_model(model, "gemini")
 
         if auto_split and session_id:
             return _err("auto_split and session_id are mutually exclusive")
@@ -647,9 +646,10 @@ async def gemini_tool(
                     "model": parsed.model or "flash",
                 })
         elif result.returncode != 0 and not parsed.success:
-            parsed = parsed.model_copy(update={
-                "content": f"gemini exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
-            })
+            msg = f"gemini exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
+            if model_warning:
+                msg = f"{msg} (hint: {model_warning})"
+            parsed = parsed.model_copy(update={"content": msg})
 
         _track_usage("gemini", parsed.usage)
         return parsed.model_dump_json(exclude_none=True)
@@ -717,9 +717,8 @@ async def claude_tool(
         validate_files(files)
         validate_timeout(timeout)
 
-        model_err = await check_model(model, "claude")
-        if model_err:
-            return _err(model_err)
+        # Advisory only — don't block, append hint if CLI fails later
+        model_warning = await check_model(model, "claude")
 
         if auto_split and session_id:
             return _err("auto_split and session_id are mutually exclusive")
@@ -864,9 +863,10 @@ async def claude_tool(
                     break  # different error, stop
                 # still rate-limited — continue to next tier
         elif result.returncode != 0 and not parsed.success:
-            parsed = parsed.model_copy(update={
-                "content": f"claude exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
-            })
+            msg = f"claude exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
+            if model_warning:
+                msg = f"{msg} (hint: {model_warning})"
+            parsed = parsed.model_copy(update={"content": msg})
 
         _track_usage("claude", parsed.usage)
         return parsed.model_dump_json(exclude_none=True)
@@ -897,6 +897,7 @@ async def broadcast_tool(
     ctx: Context | None = None,
     targets: list[str] | None = None,
     model: str = "",
+    models: dict[str, str] | None = None,
     review_uncommitted: bool = False,
     review_base: str = "",
     review_commit: str = "",
@@ -943,11 +944,16 @@ async def broadcast_tool(
     except ValueError as e:
         return _err(str(e))
 
+    # Validate per-target model keys
+    if models:
+        invalid_keys = [k for k in models if k not in _ALL_TARGETS]
+        if invalid_keys:
+            return _err(f"invalid models key(s): {', '.join(invalid_keys)}. valid: {', '.join(_ALL_TARGETS)}")
+
     # Forward pre-built prompt; disable review/files so tools don't redo the work
-    kwargs: dict[str, object] = {
+    base_kwargs: dict[str, object] = {
         "prompt": effective_prompt,
         "cd": cd,
-        "model": model,
         "review_uncommitted": False,
         "review_base": "",
         "review_commit": "",
@@ -959,6 +965,9 @@ async def broadcast_tool(
 
     async def _call(target: str) -> tuple[str, object]:
         fn = _TARGET_FNS[target]
+        # Per-target model override takes precedence over global model
+        target_model = (models or {}).get(target, model)
+        kwargs = {**base_kwargs, "model": target_model}
         try:
             raw = await fn(**kwargs)  # type: ignore[arg-type]
             return target, json.loads(raw)

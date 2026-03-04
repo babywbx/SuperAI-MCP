@@ -198,6 +198,43 @@ class TestResultsStructure:
         assert call_kwargs["model"] == "gpt-4"
 
 
+class TestPerTargetModels:
+    @pytest.mark.usefixtures("_mock_tools")
+    async def test_per_target_model_override(self, _mock_tools: dict) -> None:
+        """Per-target model overrides the global model."""
+        await broadcast_tool(
+            prompt="test", cd="/tmp", targets=["codex", "gemini"],
+            model="default-model",
+            models={"gemini": "gemini-3.1-pro-preview"},
+        )
+        codex_kwargs = _mock_tools["codex"].call_args.kwargs
+        gemini_kwargs = _mock_tools["gemini"].call_args.kwargs
+        assert codex_kwargs["model"] == "default-model"
+        assert gemini_kwargs["model"] == "gemini-3.1-pro-preview"
+
+    @pytest.mark.usefixtures("_mock_tools")
+    async def test_per_target_model_only(self, _mock_tools: dict) -> None:
+        """Per-target model without global model leaves others empty."""
+        await broadcast_tool(
+            prompt="test", cd="/tmp", targets=["codex", "gemini"],
+            models={"gemini": "gemini-3.1-pro-preview"},
+        )
+        codex_kwargs = _mock_tools["codex"].call_args.kwargs
+        gemini_kwargs = _mock_tools["gemini"].call_args.kwargs
+        assert codex_kwargs["model"] == ""
+        assert gemini_kwargs["model"] == "gemini-3.1-pro-preview"
+
+    async def test_invalid_models_key(self) -> None:
+        """Invalid key in models dict returns error."""
+        raw = await broadcast_tool(
+            prompt="test", cd="/tmp",
+            models={"gpt5": "some-model"},
+        )
+        result = json.loads(raw)
+        assert result["success"] is False
+        assert "invalid models key" in result["content"]
+
+
 class TestBroadcastValidatesFiles:
     async def test_too_many_files_rejected(self) -> None:
         """broadcast_tool enforces MAX_FILES limit."""
