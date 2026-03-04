@@ -2,10 +2,14 @@
 
 import json
 
+from unittest.mock import AsyncMock, patch
+
+from superai_mcp.runner import ProcessResult
 from superai_mcp.server import (
     _MAX_SNIPPET,
     _STDIN_THRESHOLD,
     _build_context,
+    _check_cli,
     _codex_prompt_args,
     _codex_resume_prompt_args,
     _claude_prompt_args,
@@ -14,6 +18,7 @@ from superai_mcp.server import (
     _usage,
     _track_usage,
     _reset_usage,
+    status_tool,
     usage_tool,
 )
 
@@ -295,3 +300,79 @@ class TestUsageTool:
         result = json.loads(raw)
         assert result["codex"]["calls"] == 1
         assert _usage["codex"]["calls"] == 0
+
+
+class TestCheckCli:
+    async def test_not_in_path(self) -> None:
+        with patch("superai_mcp.server.shutil.which", return_value=None):
+            result = await _check_cli("codex")
+            assert result == {"available": False, "version": None, "authenticated": False}
+
+    async def test_available_with_version(self) -> None:
+        with patch("superai_mcp.server.shutil.which", return_value="/usr/bin/codex"):
+            with patch("superai_mcp.server.run_cli", new_callable=AsyncMock) as mock_run:
+                mock_run.side_effect = [
+                    # version call
+                    ProcessResult(returncode=0, stdout_lines=["1.2.3"]),
+                    # probe call - codex returns JSONL
+                    ProcessResult(returncode=0, stdout_lines=[
+                        '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}',
+                    ]),
+                ]
+                result = await _check_cli("codex")
+                assert result["available"] is True
+                assert result["version"] == "1.2.3"
+                assert result["authenticated"] is True
+
+    async def test_available_but_not_authenticated(self) -> None:
+        with patch("superai_mcp.server.shutil.which", return_value="/usr/bin/codex"):
+            with patch("superai_mcp.server.run_cli", new_callable=AsyncMock) as mock_run:
+                mock_run.side_effect = [
+                    # version call
+                    ProcessResult(returncode=0, stdout_lines=["1.2.3"]),
+                    # probe call - fails
+                    ProcessResult(returncode=1, stdout_lines=[
+                        '{"type":"error","message":"auth required"}',
+                    ]),
+                ]
+                result = await _check_cli("codex")
+                assert result["available"] is True
+                assert result["version"] == "1.2.3"
+                assert result["authenticated"] is False
+
+    async def test_version_call_fails(self) -> None:
+        with patch("superai_mcp.server.shutil.which", return_value="/usr/bin/codex"):
+            with patch("superai_mcp.server.run_cli", new_callable=AsyncMock) as mock_run:
+                mock_run.side_effect = [
+                    # version fails
+                    Exception("timeout"),
+                    # probe succeeds
+                    ProcessResult(returncode=0, stdout_lines=[
+                        '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}',
+                    ]),
+                ]
+                result = await _check_cli("codex")
+                assert result["available"] is True
+                assert result["version"] is None
+                assert result["authenticated"] is True
+
+
+class TestStatusTool:
+    async def test_all_unavailable(self) -> None:
+        with patch("superai_mcp.server.shutil.which", return_value=None):
+            raw = await status_tool()
+            result = json.loads(raw)
+            assert result["success"] is True
+            for cli in ("codex", "gemini", "claude"):
+                assert result[cli]["available"] is False
+
+    async def test_returns_all_three(self) -> None:
+        with patch("superai_mcp.server._check_cli", new_callable=AsyncMock) as mock_check:
+            mock_check.return_value = {"available": True, "version": "1.0", "authenticated": True}
+            raw = await status_tool()
+            result = json.loads(raw)
+            assert result["success"] is True
+            assert "codex" in result
+            assert "gemini" in result
+            assert "claude" in result
+            assert mock_check.call_count == 3
