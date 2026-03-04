@@ -198,10 +198,10 @@ async def test_grace_keyword_extends_longer() -> None:
     runner_mod._GRACE_KEYWORD = 0.8  # longer
 
     try:
-        # First line has keyword "content", then silent for 0.5s.
+        # First line has keyword "item.completed", then silent for 0.5s.
         # Output grace (0.1s) would expire, but keyword grace (0.8s) saves it.
         result = await run_cli(
-            "sh", ["-c", 'echo \'{"type":"content"}\'; sleep 0.5; echo done'],
+            "sh", ["-c", 'echo \'{"type":"item.completed"}\'; sleep 0.5; echo done'],
             timeout=0.15,
         )
         assert result.returncode == 0

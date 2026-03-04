@@ -211,6 +211,14 @@ def _summarize_line(line: str) -> str:
         status = obj.get("status", "")
         return f"result: {status}"[:_MAX_SNIPPET] if status else "result"
 
+    # Gemini tool events — show concise summary, not raw JSON
+    if event_type == "tool_call":
+        name = obj.get("name", "")
+        return f"tool_call: {name}"[:_MAX_SNIPPET] if name else "tool_call"
+
+    if event_type == "tool_result":
+        return "tool_result"
+
     # Fallback: raw truncated
     return line[:_MAX_SNIPPET]
 

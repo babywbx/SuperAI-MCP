@@ -12,11 +12,13 @@ _GRACE_OUTPUT = 30.0
 # Grace period when output contains keywords signaling active generation
 _GRACE_KEYWORD = 120.0
 # Keywords in stdout that signal active generation (case-insensitive check)
+# Keywords that signal CLI is in its final output phase (strict)
 _GRACE_KEYWORDS = frozenset((
-    "generating", "writing", "assembling", "streaming",
-    "thinking", "reasoning", "processing",
-    "finalizing", "final", "summarizing",
-    '"type"', "message", "content",
+    "item.completed",    # Codex: finished an output item
+    "turn.completed",    # Codex: turn wrapping up
+    "agent_message",     # Codex: final agent message
+    "finalizing",        # explicit finalization
+    "summarizing",       # explicit summarization
 ))
 
 

@@ -252,6 +252,12 @@ def parse_gemini_output(
                 if isinstance(content, str) and content:
                     chunks.append(content)
 
+        elif etype in ("tool_call", "tool_result"):
+            # Discard intermediate text before tool use;
+            # only keep the final answer after all tool cycles.
+            if not return_all:
+                chunks.clear()
+
         elif etype == "result":
             success = event.get("status") == "success"
             stats = event.get("stats")
