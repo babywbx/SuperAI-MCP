@@ -988,6 +988,94 @@ async def broadcast_tool(
     return json.dumps({"success": True, "results": results})
 
 
+# ---------------------------------------------------------------------------
+# Multi-model collaboration tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool(name="chain", annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False,
+))
+async def chain_tool(
+    steps: list[dict[str, str]],
+    cd: str,
+    ctx: Context | None = None,
+    system_prompt: str = "",
+    timeout: float = 300.0,
+) -> str:
+    """Run a sequential multi-model pipeline. Each step's output is auto-injected into the next.
+
+    steps: list of {target, prompt, model?} objects. target is "codex", "gemini", or "claude".
+    Each step receives the previous step's output wrapped in <previous_output> tags.
+    Stops on first failure and returns partial results.
+    """
+    import time
+
+    try:
+        validate_cd(cd)
+        validate_timeout(timeout)
+    except ValueError as e:
+        return _err(str(e))
+
+    if not steps:
+        return _err("steps must be a non-empty list")
+
+    # Validate all targets upfront
+    for i, step in enumerate(steps):
+        target = step.get("target", "")
+        if target not in _TARGET_FNS:
+            return _err(f"step {i}: invalid target {target!r}, must be one of {list(_ALL_TARGETS)}")
+        if not step.get("prompt"):
+            return _err(f"step {i}: prompt is required")
+
+    deadline = time.monotonic() + timeout
+    completed: list[dict[str, object]] = []
+    prev_output: str | None = None
+
+    for i, step in enumerate(steps):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+
+        target = step["target"]
+        prompt = step["prompt"]
+        step_model = step.get("model", "")
+
+        # Inject previous output
+        if prev_output is not None:
+            prompt = f"<previous_output>\n{prev_output}\n</previous_output>\n\n{prompt}"
+
+        kwargs: dict[str, object] = {
+            "prompt": prompt,
+            "cd": cd,
+            "system_prompt": system_prompt if i == 0 else "",
+            "timeout": remaining,
+        }
+        if step_model:
+            kwargs["model"] = step_model
+
+        fn = _TARGET_FNS[target]
+        try:
+            raw = await fn(**kwargs)  # type: ignore[arg-type]
+            result = json.loads(raw)
+        except Exception as exc:
+            completed.append({"step": i, "target": target, "success": False, "content": str(exc)})
+            return json.dumps({"success": False, "steps": completed, "final_content": str(exc)})
+
+        content = result.get("content", "")
+        success = result.get("success", False)
+        completed.append({"step": i, "target": target, "success": success, "content": content})
+
+        if not success:
+            return json.dumps({"success": False, "steps": completed, "final_content": content})
+
+        prev_output = content
+
+    all_ok = all(s.get("success") for s in completed)
+    final = completed[-1]["content"] if completed else ""
+    return json.dumps({"success": all_ok, "steps": completed, "final_content": final})
+
+
 @mcp.tool(name="list-models", annotations=ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=True,
 ))
