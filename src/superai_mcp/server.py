@@ -31,6 +31,7 @@ from superai_mcp.validate import (
     validate_reasoning_effort,
     validate_sandbox,
     validate_session_id,
+    validate_timeout,
 )
 
 mcp = FastMCP("super")
@@ -237,6 +238,8 @@ async def codex_tool(
     files: list[str] | None = None,
     return_all_messages: bool = False,
     auto_split: bool = False,
+    system_prompt: str = "",
+    timeout: float = 300.0,
 ) -> str:
     """Run Codex CLI for coding tasks, code review, or general prompts.
 
@@ -258,6 +261,7 @@ async def codex_tool(
         validate_reasoning_effort(reasoning_effort)
         validate_commit_sha(review_commit)
         validate_files(files)
+        validate_timeout(timeout)
 
         model_err = await check_model(model, "codex")
         if model_err:
@@ -279,6 +283,7 @@ async def codex_tool(
             review_base=review_base,
             review_commit=review_commit,
             files=files,
+            system_prompt=system_prompt,
         )
 
         if auto_split:
@@ -323,6 +328,7 @@ async def codex_tool(
 
             parsed = await run_auto_split(
                 effective_prompt, call_fn=_call, resume_fn=_resume,
+                total_timeout=timeout,
             )
             return parsed.model_dump_json(exclude_none=True)
 
@@ -351,9 +357,10 @@ async def codex_tool(
                 args.extend(["-c", f"model_reasoning_effort={reasoning_effort}"])
             args.extend(prompt_args)
 
-        progress_cb = _make_progress_cb(ctx, "codex", 300.0)
+        progress_cb = _make_progress_cb(ctx, "codex", timeout)
         result = await run_cli(
             "codex", args, cwd=cd, stdin_data=stdin_data, on_progress=progress_cb,
+            timeout=timeout,
         )
         parsed = parse_codex_output(result.stdout_lines, return_all=return_all_messages)
         if not parsed.model:
@@ -403,7 +410,7 @@ async def codex_tool(
                 retry_args.extend(retry_prompt_args)
                 retry_result = await run_cli(
                     "codex", retry_args, cwd=cd, stdin_data=retry_stdin,
-                    on_progress=progress_cb,
+                    on_progress=progress_cb, timeout=timeout,
                 )
                 parsed = parse_codex_output(
                     retry_result.stdout_lines, return_all=return_all_messages,
@@ -447,6 +454,8 @@ async def gemini_tool(
     files: list[str] | None = None,
     return_all_messages: bool = False,
     auto_split: bool = False,
+    system_prompt: str = "",
+    timeout: float = 300.0,
 ) -> str:
     """Run Gemini CLI for coding tasks, code review, or general prompts.
 
@@ -466,6 +475,7 @@ async def gemini_tool(
         validate_model(model)
         validate_commit_sha(review_commit)
         validate_files(files)
+        validate_timeout(timeout)
 
         model_err = await check_model(model, "gemini")
         if model_err:
@@ -480,6 +490,7 @@ async def gemini_tool(
             review_base=review_base,
             review_commit=review_commit,
             files=files,
+            system_prompt=system_prompt,
         )
 
         if not sandbox and not os.environ.get("SUPERAI_ALLOW_DANGEROUS"):
@@ -523,6 +534,7 @@ async def gemini_tool(
 
             parsed = await run_auto_split(
                 effective_prompt, call_fn=_call, resume_fn=_resume,
+                total_timeout=timeout,
             )
             return parsed.model_dump_json(exclude_none=True)
 
@@ -535,9 +547,10 @@ async def gemini_tool(
         if session_id:
             args.extend(["--resume", session_id])
 
-        progress_cb = _make_progress_cb(ctx, "gemini", 300.0)
+        progress_cb = _make_progress_cb(ctx, "gemini", timeout)
         result = await run_cli(
             "gemini", args, cwd=cd, stdin_data=stdin_data, on_progress=progress_cb,
+            timeout=timeout,
         )
         parsed = parse_gemini_output(result.stdout_lines, return_all=return_all_messages)
         if not parsed.model:
@@ -554,7 +567,7 @@ async def gemini_tool(
                 retry_args.extend(["--resume", session_id])
             retry_result = await run_cli(
                 "gemini", retry_args, cwd=cd, stdin_data=retry_stdin,
-                on_progress=progress_cb,
+                on_progress=progress_cb, timeout=timeout,
             )
             parsed = parse_gemini_output(retry_result.stdout_lines, return_all=return_all_messages)
             if parsed.success:
@@ -602,6 +615,8 @@ async def claude_tool(
     files: list[str] | None = None,
     return_all_messages: bool = False,
     auto_split: bool = False,
+    system_prompt: str = "",
+    timeout: float = 300.0,
 ) -> str:
     """Run Claude CLI for coding tasks, code review, or general prompts.
 
@@ -624,6 +639,7 @@ async def claude_tool(
         validate_max_budget(max_budget_usd)
         validate_commit_sha(review_commit)
         validate_files(files)
+        validate_timeout(timeout)
 
         model_err = await check_model(model, "claude")
         if model_err:
@@ -638,6 +654,7 @@ async def claude_tool(
             review_base=review_base,
             review_commit=review_commit,
             files=files,
+            system_prompt=system_prompt,
         )
 
         # Sandbox mapping (needed for both auto_split and normal paths)
@@ -693,6 +710,7 @@ async def claude_tool(
 
             parsed = await run_auto_split(
                 effective_prompt, call_fn=_call, resume_fn=_resume,
+                total_timeout=timeout,
             )
             return parsed.model_dump_json(exclude_none=True)
 
@@ -710,10 +728,10 @@ async def claude_tool(
         args.extend(sandbox_args)
 
         env = _claude_env()
-        progress_cb = _make_progress_cb(ctx, "claude", 300.0)
+        progress_cb = _make_progress_cb(ctx, "claude", timeout)
         result = await run_cli(
             "claude", args, cwd=cd, env=env, stdin_data=stdin_data,
-            on_progress=progress_cb,
+            on_progress=progress_cb, timeout=timeout,
         )
         parsed = parse_claude_output(result.stdout_lines, return_all=return_all_messages)
         if not parsed.model:
@@ -754,7 +772,7 @@ async def claude_tool(
                 retry_args.extend(sandbox_args)
                 retry_result = await run_cli(
                     "claude", retry_args, cwd=cd, env=env, stdin_data=retry_stdin,
-                    on_progress=progress_cb,
+                    on_progress=progress_cb, timeout=timeout,
                 )
                 parsed = parse_claude_output(
                     retry_result.stdout_lines, return_all=return_all_messages,
@@ -806,6 +824,8 @@ async def broadcast_tool(
     review_commit: str = "",
     files: list[str] | None = None,
     return_all_messages: bool = False,
+    system_prompt: str = "",
+    timeout: float = 300.0,
 ) -> str:
     """Broadcast the same prompt to multiple CLI tools in parallel.
 
@@ -833,12 +853,14 @@ async def broadcast_tool(
         validate_cd(cd)
         validate_commit_sha(review_commit)
         validate_files(files)
+        validate_timeout(timeout)
         effective_prompt = await _build_context(
             prompt, cd=cd,
             review_uncommitted=review_uncommitted,
             review_base=review_base,
             review_commit=review_commit,
             files=files,
+            system_prompt=system_prompt,
         )
     except ValueError as e:
         return _err(str(e))
@@ -853,6 +875,8 @@ async def broadcast_tool(
         "review_commit": "",
         "files": None,
         "return_all_messages": return_all_messages,
+        "system_prompt": "",
+        "timeout": timeout,
     }
 
     async def _call(target: str) -> tuple[str, object]:
