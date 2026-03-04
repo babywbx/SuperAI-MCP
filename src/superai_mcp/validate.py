@@ -80,9 +80,10 @@ def validate_commit_sha(sha: str) -> str:
 
 
 def validate_timeout(timeout: float) -> float:
-    """Validate timeout is positive."""
-    if timeout <= 0:
-        raise ValueError(f"invalid timeout: {timeout}, must be > 0")
+    """Validate timeout is a finite positive number."""
+    import math
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError(f"invalid timeout: {timeout}, must be > 0 and finite")
     return timeout
 
 

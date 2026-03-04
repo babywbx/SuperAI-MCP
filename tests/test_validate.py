@@ -176,6 +176,18 @@ class TestValidateTimeout:
         with pytest.raises(ValueError, match="must be > 0"):
             validate_timeout(-1.0)
 
+    def test_nan(self) -> None:
+        with pytest.raises(ValueError, match="finite"):
+            validate_timeout(float("nan"))
+
+    def test_inf(self) -> None:
+        with pytest.raises(ValueError, match="finite"):
+            validate_timeout(float("inf"))
+
+    def test_neg_inf(self) -> None:
+        with pytest.raises(ValueError, match="finite"):
+            validate_timeout(float("-inf"))
+
 
 class TestValidateFiles:
     def test_normal_list(self) -> None:

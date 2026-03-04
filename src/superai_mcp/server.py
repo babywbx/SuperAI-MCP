@@ -954,7 +954,7 @@ async def list_models_tool(
 
 
 @mcp.tool(name="usage", annotations=ToolAnnotations(
-    readOnlyHint=True, destructiveHint=False, idempotentHint=True,
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False,
 ))
 async def usage_tool(reset: bool = False) -> str:
     """Show cumulative token usage and call counts across all CLI tools.
@@ -995,7 +995,10 @@ async def _check_cli(name: str) -> dict[str, object]:
     authenticated = False
     try:
         if name == "codex":
-            args = ["exec", "--json", "--sandbox", "read-only", "--", _PROBE_PROMPT]
+            args = [
+                "exec", "--json", "--sandbox", "read-only",
+                "--skip-git-repo-check", "--", _PROBE_PROMPT,
+            ]
             env = None
         elif name == "gemini":
             args = ["-p", _PROBE_PROMPT, "-o", "stream-json", "--sandbox"]
