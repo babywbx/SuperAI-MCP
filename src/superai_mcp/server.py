@@ -54,6 +54,25 @@ _STATUS_TIMEOUT = 15.0
 # Well under macOS ARG_MAX (~1MB) to leave room for env vars and other args.
 _STDIN_THRESHOLD = 200_000  # bytes
 
+# Nesting depth control to prevent recursive fork bombs.
+_MAX_DEPTH = 5
+_DEPTH_ENV = "SUPERAI_MCP_DEPTH"
+
+
+def _get_depth() -> int:
+    """Get current nesting depth from environment."""
+    try:
+        return int(os.environ.get(_DEPTH_ENV, "0"))
+    except (ValueError, TypeError):
+        return 0
+
+
+def _child_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Build child process env with incremented nesting depth."""
+    env = dict(base if base is not None else os.environ)
+    env[_DEPTH_ENV] = str(_get_depth() + 1)
+    return env
+
 # Cumulative usage tracking (in-memory only, resets on process restart)
 _usage: dict[str, dict[str, int]] = {}
 
@@ -279,6 +298,10 @@ async def codex_tool(
       - Resume: pass session_id from a previous call
     """
     try:
+        depth = _get_depth()
+        if depth >= _MAX_DEPTH:
+            return _err(f"nesting depth {depth} reached limit {_MAX_DEPTH}")
+
         if not shutil.which("codex"):
             return _err("codex CLI not found in PATH")
 
@@ -291,6 +314,8 @@ async def codex_tool(
         validate_commit_sha(review_commit)
         validate_files(files)
         validate_timeout(timeout)
+
+        env = _child_env()
 
         model_err = await check_model(model, "codex")
         if model_err:
@@ -330,7 +355,8 @@ async def codex_tool(
                     a.extend(["-c", f"model_reasoning_effort={reasoning_effort}"])
                 a.extend(prompt_args)
                 r = await run_cli(
-                    "codex", a, cwd=cd, stdin_data=stdin_data, timeout=timeout,
+                    "codex", a, cwd=cd, env=env, stdin_data=stdin_data,
+                    timeout=timeout,
                     on_progress=_make_progress_cb(ctx, "codex", timeout),
                 )
                 parsed = parse_codex_output(r.stdout_lines)
@@ -347,7 +373,8 @@ async def codex_tool(
                     a.extend(["-c", f"model_reasoning_effort={reasoning_effort}"])
                 a.extend(prompt_args)
                 r = await run_cli(
-                    "codex", a, cwd=cd, stdin_data=stdin_data, timeout=timeout,
+                    "codex", a, cwd=cd, env=env, stdin_data=stdin_data,
+                    timeout=timeout,
                     on_progress=_make_progress_cb(ctx, "codex", timeout),
                 )
                 parsed = parse_codex_output(r.stdout_lines)
@@ -389,8 +416,8 @@ async def codex_tool(
 
         progress_cb = _make_progress_cb(ctx, "codex", timeout)
         result = await run_cli(
-            "codex", args, cwd=cd, stdin_data=stdin_data, on_progress=progress_cb,
-            timeout=timeout,
+            "codex", args, cwd=cd, env=env, stdin_data=stdin_data,
+            on_progress=progress_cb, timeout=timeout,
         )
         parsed = parse_codex_output(result.stdout_lines, return_all=return_all_messages)
         if not parsed.model:
@@ -417,7 +444,8 @@ async def codex_tool(
                 probe_args.extend(["-c", f"model_reasoning_effort={next_effort}"])
                 probe_args.extend(["--", _PROBE_PROMPT])
                 probe_result = await run_cli(
-                    "codex", probe_args, cwd=cd, timeout=_PROBE_TIMEOUT,
+                    "codex", probe_args, cwd=cd, env=env,
+                    timeout=_PROBE_TIMEOUT,
                 )
                 probe_parsed = parse_codex_output(probe_result.stdout_lines)
                 if not probe_parsed.success:
@@ -439,7 +467,8 @@ async def codex_tool(
                 retry_args.extend(["-c", f"model_reasoning_effort={next_effort}"])
                 retry_args.extend(retry_prompt_args)
                 retry_result = await run_cli(
-                    "codex", retry_args, cwd=cd, stdin_data=retry_stdin,
+                    "codex", retry_args, cwd=cd, env=env,
+                    stdin_data=retry_stdin,
                     on_progress=progress_cb, timeout=timeout,
                 )
                 parsed = parse_codex_output(
@@ -497,6 +526,10 @@ async def gemini_tool(
       - Resume: pass session_id from a previous call
     """
     try:
+        depth = _get_depth()
+        if depth >= _MAX_DEPTH:
+            return _err(f"nesting depth {depth} reached limit {_MAX_DEPTH}")
+
         if not shutil.which("gemini"):
             return _err("gemini CLI not found in PATH")
 
@@ -507,6 +540,8 @@ async def gemini_tool(
         validate_commit_sha(review_commit)
         validate_files(files)
         validate_timeout(timeout)
+
+        env = _child_env()
 
         model_err = await check_model(model, "gemini")
         if model_err:
@@ -539,7 +574,8 @@ async def gemini_tool(
                 if model:
                     a.extend(["--model", model])
                 r = await run_cli(
-                    "gemini", a, cwd=cd, stdin_data=stdin_data, timeout=timeout,
+                    "gemini", a, cwd=cd, env=env, stdin_data=stdin_data,
+                    timeout=timeout,
                     on_progress=_make_progress_cb(ctx, "gemini", timeout),
                 )
                 parsed = parse_gemini_output(r.stdout_lines)
@@ -555,7 +591,8 @@ async def gemini_tool(
                 if model:
                     a.extend(["--model", model])
                 r = await run_cli(
-                    "gemini", a, cwd=cd, stdin_data=stdin_data, timeout=timeout,
+                    "gemini", a, cwd=cd, env=env, stdin_data=stdin_data,
+                    timeout=timeout,
                     on_progress=_make_progress_cb(ctx, "gemini", timeout),
                 )
                 parsed = parse_gemini_output(r.stdout_lines)
@@ -581,8 +618,8 @@ async def gemini_tool(
 
         progress_cb = _make_progress_cb(ctx, "gemini", timeout)
         result = await run_cli(
-            "gemini", args, cwd=cd, stdin_data=stdin_data, on_progress=progress_cb,
-            timeout=timeout,
+            "gemini", args, cwd=cd, env=env, stdin_data=stdin_data,
+            on_progress=progress_cb, timeout=timeout,
         )
         parsed = parse_gemini_output(result.stdout_lines, return_all=return_all_messages)
         if not parsed.model:
@@ -598,7 +635,7 @@ async def gemini_tool(
             if session_id:
                 retry_args.extend(["--resume", session_id])
             retry_result = await run_cli(
-                "gemini", retry_args, cwd=cd, stdin_data=retry_stdin,
+                "gemini", retry_args, cwd=cd, env=env, stdin_data=retry_stdin,
                 on_progress=progress_cb, timeout=timeout,
             )
             parsed = parse_gemini_output(retry_result.stdout_lines, return_all=return_all_messages)
@@ -660,6 +697,10 @@ async def claude_tool(
       - Resume: pass session_id from a previous call
     """
     try:
+        depth = _get_depth()
+        if depth >= _MAX_DEPTH:
+            return _err(f"nesting depth {depth} reached limit {_MAX_DEPTH}")
+
         if not shutil.which("claude"):
             return _err("claude CLI not found in PATH")
 
@@ -703,7 +744,7 @@ async def claude_tool(
             sandbox_args.append("--dangerously-skip-permissions")
 
         if auto_split:
-            env = _claude_env()
+            env = _child_env(_claude_env())
 
             async def _call(p: str, timeout: float) -> CLIResult:
                 prompt_args, stdin_data = _claude_prompt_args(p)
@@ -761,7 +802,7 @@ async def claude_tool(
             args.extend(["--max-budget-usd", str(max_budget_usd)])
         args.extend(sandbox_args)
 
-        env = _claude_env()
+        env = _child_env(_claude_env())
         progress_cb = _make_progress_cb(ctx, "claude", timeout)
         result = await run_cli(
             "claude", args, cwd=cd, env=env, stdin_data=stdin_data,

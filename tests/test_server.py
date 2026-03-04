@@ -6,14 +6,18 @@ from unittest.mock import AsyncMock, patch
 
 from superai_mcp.runner import ProcessResult
 from superai_mcp.server import (
+    _DEPTH_ENV,
+    _MAX_DEPTH,
     _MAX_SNIPPET,
     _STDIN_THRESHOLD,
     _build_context,
     _check_cli,
+    _child_env,
     _codex_prompt_args,
     _codex_resume_prompt_args,
     _claude_prompt_args,
     _gemini_prompt_args,
+    _get_depth,
     _summarize_line,
     _usage,
     _track_usage,
@@ -376,3 +380,59 @@ class TestStatusTool:
             assert "gemini" in result
             assert "claude" in result
             assert mock_check.call_count == 3
+
+
+class TestNestingDepth:
+    def test_get_depth_default(self) -> None:
+        import os
+        old = os.environ.pop(_DEPTH_ENV, None)
+        try:
+            assert _get_depth() == 0
+        finally:
+            if old is not None:
+                os.environ[_DEPTH_ENV] = old
+
+    def test_get_depth_set(self) -> None:
+        import os
+        old = os.environ.get(_DEPTH_ENV)
+        os.environ[_DEPTH_ENV] = "3"
+        try:
+            assert _get_depth() == 3
+        finally:
+            if old is not None:
+                os.environ[_DEPTH_ENV] = old
+            else:
+                os.environ.pop(_DEPTH_ENV, None)
+
+    def test_get_depth_invalid(self) -> None:
+        import os
+        old = os.environ.get(_DEPTH_ENV)
+        os.environ[_DEPTH_ENV] = "not_a_number"
+        try:
+            assert _get_depth() == 0
+        finally:
+            if old is not None:
+                os.environ[_DEPTH_ENV] = old
+            else:
+                os.environ.pop(_DEPTH_ENV, None)
+
+    def test_child_env_increments(self) -> None:
+        import os
+        old = os.environ.get(_DEPTH_ENV)
+        os.environ[_DEPTH_ENV] = "2"
+        try:
+            env = _child_env()
+            assert env[_DEPTH_ENV] == "3"
+        finally:
+            if old is not None:
+                os.environ[_DEPTH_ENV] = old
+            else:
+                os.environ.pop(_DEPTH_ENV, None)
+
+    def test_child_env_with_base(self) -> None:
+        env = _child_env({"FOO": "bar"})
+        assert env["FOO"] == "bar"
+        assert _DEPTH_ENV in env
+
+    def test_max_depth_default(self) -> None:
+        assert _MAX_DEPTH == 5
