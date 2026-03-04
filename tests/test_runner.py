@@ -163,6 +163,76 @@ async def test_run_stdin_data_early_close() -> None:
     assert len(result.stdout_lines) == 1
 
 
+async def test_grace_output_extends_timeout() -> None:
+    """Process that keeps producing output gets 30s grace instead of timeout."""
+    import superai_mcp.runner as runner_mod
+
+    orig_interval = runner_mod._PROGRESS_INTERVAL
+    orig_output = runner_mod._GRACE_OUTPUT
+    runner_mod._PROGRESS_INTERVAL = 0.05
+    runner_mod._GRACE_OUTPUT = 0.5
+
+    try:
+        # Process outputs a line every 0.1s for 0.4s, with a 0.2s timeout.
+        # Without grace: timeout at 0.2s. With grace: extends because output flows.
+        result = await run_cli(
+            "sh", ["-c", "for i in 1 2 3 4; do echo line$i; sleep 0.1; done"],
+            timeout=0.2,
+        )
+        assert result.returncode == 0
+        assert len(result.stdout_lines) == 4
+    finally:
+        runner_mod._PROGRESS_INTERVAL = orig_interval
+        runner_mod._GRACE_OUTPUT = orig_output
+
+
+async def test_grace_keyword_extends_longer() -> None:
+    """Process with keyword in output gets longer (keyword) grace period."""
+    import superai_mcp.runner as runner_mod
+
+    orig_interval = runner_mod._PROGRESS_INTERVAL
+    orig_output = runner_mod._GRACE_OUTPUT
+    orig_keyword = runner_mod._GRACE_KEYWORD
+    runner_mod._PROGRESS_INTERVAL = 0.05
+    runner_mod._GRACE_OUTPUT = 0.1  # short
+    runner_mod._GRACE_KEYWORD = 0.8  # longer
+
+    try:
+        # First line has keyword "content", then silent for 0.5s.
+        # Output grace (0.1s) would expire, but keyword grace (0.8s) saves it.
+        result = await run_cli(
+            "sh", ["-c", 'echo \'{"type":"content"}\'; sleep 0.5; echo done'],
+            timeout=0.15,
+        )
+        assert result.returncode == 0
+        assert "done" in result.stdout_lines[-1]
+    finally:
+        runner_mod._PROGRESS_INTERVAL = orig_interval
+        runner_mod._GRACE_OUTPUT = orig_output
+        runner_mod._GRACE_KEYWORD = orig_keyword
+
+
+async def test_grace_still_times_out_when_silent() -> None:
+    """Process that stops producing output eventually times out even with grace."""
+    import superai_mcp.runner as runner_mod
+
+    orig_interval = runner_mod._PROGRESS_INTERVAL
+    orig_output = runner_mod._GRACE_OUTPUT
+    runner_mod._PROGRESS_INTERVAL = 0.05
+    runner_mod._GRACE_OUTPUT = 0.15
+
+    try:
+        # Process outputs one line then goes silent — grace should not save it
+        with pytest.raises(asyncio.TimeoutError):
+            await run_cli(
+                "sh", ["-c", "echo start; sleep 10"],
+                timeout=0.2,
+            )
+    finally:
+        runner_mod._PROGRESS_INTERVAL = orig_interval
+        runner_mod._GRACE_OUTPUT = orig_output
+
+
 def test_process_result_frozen() -> None:
     r = ProcessResult(returncode=0, stdout_lines=["a"], stderr="")
     with pytest.raises(AttributeError):

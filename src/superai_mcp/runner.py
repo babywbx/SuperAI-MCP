@@ -7,6 +7,17 @@ from pathlib import Path
 
 # Interval in seconds between progress callbacks
 _PROGRESS_INTERVAL = 5.0
+# Grace period when CLI has new output (still active)
+_GRACE_OUTPUT = 30.0
+# Grace period when output contains keywords signaling active generation
+_GRACE_KEYWORD = 120.0
+# Keywords in stdout that signal active generation (case-insensitive check)
+_GRACE_KEYWORDS = frozenset((
+    "generating", "writing", "assembling", "streaming",
+    "thinking", "reasoning", "processing",
+    "finalizing", "final", "summarizing",
+    '"type"', "message", "content",
+))
 
 
 @dataclass(frozen=True)
@@ -89,6 +100,8 @@ async def run_cli(
         wait_task = asyncio.create_task(proc.wait())
         elapsed = 0.0
         remaining = timeout
+        last_line_count = 0
+        in_grace = False
 
         while True:
             interval = min(_PROGRESS_INTERVAL, remaining)
@@ -98,10 +111,27 @@ async def run_cli(
             elapsed += interval
             remaining -= interval
             if remaining <= 0:
-                raise asyncio.TimeoutError()
+                # Grace period: extend if CLI is still producing output
+                current_count = len(stdout_lines)
+                has_new_output = current_count > last_line_count
+                has_keywords = False
+                if stdout_lines:
+                    recent = stdout_lines[-1].lower()
+                    has_keywords = any(kw in recent for kw in _GRACE_KEYWORDS)
+                if has_keywords:
+                    remaining = _GRACE_KEYWORD
+                    last_line_count = current_count
+                    in_grace = True
+                elif has_new_output:
+                    remaining = _GRACE_OUTPUT
+                    last_line_count = current_count
+                    in_grace = True
+                else:
+                    raise asyncio.TimeoutError()
             if on_progress is not None:
                 latest = stdout_lines[-1] if stdout_lines else ""
-                await on_progress(elapsed, latest)
+                suffix = " (grace period)" if in_grace else ""
+                await on_progress(elapsed, latest + suffix)
     except BaseException:
         proc.kill()
         await proc.wait()
