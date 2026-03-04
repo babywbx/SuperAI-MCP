@@ -1208,6 +1208,104 @@ async def vote_tool(
     })
 
 
+@mcp.tool(name="debate", annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False,
+))
+async def debate_tool(
+    prompt: str,
+    cd: str,
+    ctx: Context | None = None,
+    side_a: str = "codex",
+    side_b: str = "claude",
+    rounds: int = 3,
+    model: str = "",
+    system_prompt: str = "",
+    timeout: float = 300.0,
+) -> str:
+    """Alternating debate between two models over multiple rounds.
+
+    side_a starts, then side_b critiques and improves, then side_a again, etc.
+    Each round sees the opponent's previous response via <opponent_response> tags.
+    """
+    import time
+
+    try:
+        validate_cd(cd)
+        validate_timeout(timeout)
+    except ValueError as e:
+        return _err(str(e))
+
+    if side_a not in _TARGET_FNS:
+        return _err(f"invalid side_a: {side_a!r}, must be one of {list(_ALL_TARGETS)}")
+    if side_b not in _TARGET_FNS:
+        return _err(f"invalid side_b: {side_b!r}, must be one of {list(_ALL_TARGETS)}")
+    if side_a == side_b:
+        return _err("side_a and side_b must be different")
+    if rounds < 1:
+        return _err("rounds must be >= 1")
+
+    deadline = time.monotonic() + timeout
+    sides = [side_a, side_b]
+    round_results: list[dict[str, object]] = []
+    prev_content: str | None = None
+
+    for i in range(rounds):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+
+        side = sides[i % 2]
+        round_prompt = prompt
+
+        if prev_content is not None:
+            round_prompt = (
+                f"<opponent_response>\n{prev_content}\n</opponent_response>\n\n"
+                f"The above is your opponent's response to this topic. "
+                f"Critique it and provide your improved answer.\n\n"
+                f"Original topic: {prompt}"
+            )
+
+        fn = _TARGET_FNS[side]
+        try:
+            raw = await fn(
+                prompt=round_prompt, cd=cd,
+                system_prompt=system_prompt if i == 0 else "",
+                timeout=remaining, model=model,
+            )
+            result = json.loads(raw)
+        except Exception as exc:
+            round_results.append({
+                "round": i + 1, "side": side, "success": False, "content": str(exc),
+            })
+            return json.dumps({
+                "success": False,
+                "rounds": round_results,
+                "final_answer": str(exc),
+            })
+
+        content = result.get("content", "")
+        success = result.get("success", False)
+        round_results.append({
+            "round": i + 1, "side": side, "success": success, "content": content,
+        })
+
+        if not success:
+            return json.dumps({
+                "success": False,
+                "rounds": round_results,
+                "final_answer": content,
+            })
+
+        prev_content = content
+
+    final = round_results[-1]["content"] if round_results else ""
+    return json.dumps({
+        "success": True,
+        "rounds": round_results,
+        "final_answer": final,
+    })
+
+
 @mcp.tool(name="list-models", annotations=ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=True,
 ))
