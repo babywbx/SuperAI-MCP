@@ -5,6 +5,7 @@ import json
 from superai_mcp.server import (
     _MAX_SNIPPET,
     _STDIN_THRESHOLD,
+    _build_context,
     _codex_prompt_args,
     _codex_resume_prompt_args,
     _claude_prompt_args,
@@ -200,3 +201,23 @@ class TestPromptArgHelpers:
         prompt = "x" * (_STDIN_THRESHOLD + 1)
         _, data = _gemini_prompt_args(prompt)
         assert data is not None
+
+
+class TestBuildContextSystemPrompt:
+    async def test_system_prompt_prepended(self) -> None:
+        result = await _build_context(
+            "do stuff", cd="/tmp",
+            review_uncommitted=False, review_base="", files=None,
+            system_prompt="You are a code reviewer",
+        )
+        assert result.startswith("<system>You are a code reviewer</system>")
+        assert result.endswith("do stuff")
+
+    async def test_empty_system_prompt(self) -> None:
+        result = await _build_context(
+            "do stuff", cd="/tmp",
+            review_uncommitted=False, review_base="", files=None,
+            system_prompt="",
+        )
+        assert result == "do stuff"
+        assert "<system>" not in result

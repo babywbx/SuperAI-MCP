@@ -192,9 +192,13 @@ async def _build_context(
     review_base: str,
     review_commit: str = "",
     files: list[str] | None,
+    system_prompt: str = "",
 ) -> str:
     """Build prompt with optional diff/file context."""
     parts: list[str] = []
+
+    if system_prompt:
+        parts.append(f"<system>{system_prompt}</system>")
 
     if review_uncommitted or review_base or review_commit:
         diff_text = await get_git_diff(
