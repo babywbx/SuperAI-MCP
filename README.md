@@ -1,50 +1,59 @@
 # 🚀 SuperAI MCP
 
-将 **Gemini CLI**、**Codex CLI** 和 **Claude CLI** 包装为 MCP 工具，让 Claude Code 能调用其他 AI CLI 进行 code review 和编码任务。
+[![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![MCP](https://img.shields.io/badge/MCP-FastMCP-8A2BE2)](https://modelcontextprotocol.io/)
+[![Claude Code](https://img.shields.io/badge/Claude_Code-compatible-cc785c?logo=anthropic&logoColor=white)](https://github.com/anthropics/claude-code)
+[![Codex CLI](https://img.shields.io/badge/Codex_CLI-compatible-74aa9c?logo=openai&logoColor=white)](https://github.com/openai/codex)
+[![Gemini CLI](https://img.shields.io/badge/Gemini_CLI-compatible-4285F4?logo=google&logoColor=white)](https://github.com/google-gemini/gemini-cli)
 
-## ✨ 特性
+[中文](README_ZH.md)
 
-- 🔧 **十工具**: `codex` + `gemini` + `claude` + `broadcast` + `chain` + `vote` + `debate` + `list-models` + `status` + `usage`
-- 📋 **五种模式**: prompt 转发 / git diff review (uncommitted/base/commit) / 文件列表 review
-- 🔄 **会话续接**: 通过 `session_id` 延续上下文
-- 🎯 **模型选择**: 支持指定模型和推理深度
-- ⚡ **纯异步**: 基于 `asyncio.create_subprocess_exec`，无线程
-- 🔍 **模型发现**: `list-models` 实时查询可用模型，`model` 参数自动校验+纠错建议
-- 🔒 **安全**: 路径遍历防护、git ref 校验、无 shell 注入、嵌套深度限制 (最大 5 层)
-- 📡 **进度通知**: 长时间任务每 5s 发送 `report_progress` keepalive
-- ⏱️ **超时+宽限期**: 默认 300s 超时，CLI 活跃输出时自动延长 (30s 新输出 / 120s 关键词匹配)
-- 🔄 **配额回退**: 限流时自动级联降级（Gemini→flash / Claude→sonnet→haiku / Codex effort 降级）
-- 📝 **系统提示**: `system_prompt` 参数注入系统级指令
-- 📦 **大 prompt 支持**: >200KB 自动通过 stdin 传递，避免 OS ARG_MAX 限制
-- 🏷️ **工具注解**: 每个工具附带 `ToolAnnotations` 元数据
-- 🤝 **多模型协作**: `chain` 流水线 / `vote` 投票共识 / `debate` 辩论迭代
+Wraps **Gemini CLI**, **Codex CLI**, and **Claude CLI** as MCP tools, enabling Claude Code to invoke other AI CLIs for code review and coding tasks.
 
-## 📦 前置依赖
+## ✨ Features
+
+- 🔧 **10 tools**: `codex` + `gemini` + `claude` + `broadcast` + `chain` + `vote` + `debate` + `list-models` + `status` + `usage`
+- 📋 **5 modes**: prompt forwarding / git diff review (uncommitted/base/commit) / file list review
+- 🔄 **Session resume**: continue context via `session_id`
+- 🎯 **Model selection**: specify model and reasoning effort
+- ⚡ **Pure async**: built on `asyncio.create_subprocess_exec`, no threads
+- 🔍 **Model discovery**: `list-models` queries available models in real-time, `model` param auto-validates with correction suggestions
+- 🔒 **Secure**: path traversal guard, git ref validation, no shell injection, nesting depth limit (max 5)
+- 📡 **Progress notifications**: `report_progress` keepalive every 5s during long tasks
+- ⏱️ **Timeout + grace period**: 300s default timeout, auto-extends when CLI is actively producing output (30s for new output / 120s for keyword match)
+- 🔄 **Rate-limit fallback**: automatic cascading degradation (Gemini→flash / Claude→sonnet→haiku / Codex effort downgrade)
+- 📝 **System prompt**: `system_prompt` param injects system-level instructions
+- 📦 **Large prompt support**: >200KB auto-piped via stdin to avoid OS ARG_MAX limits
+- 🏷️ **Tool annotations**: every tool includes `ToolAnnotations` metadata
+- 🤝 **Multi-model collaboration**: `chain` pipeline / `vote` consensus / `debate` iteration
+
+## 📦 Prerequisites
 
 - Python >= 3.12
 - [uv](https://docs.astral.sh/uv/)
-- 至少安装以下 CLI 之一（未安装的会在调用时返回错误，不影响其他工具）：
+- At least one of the following CLIs (invoking an uninstalled CLI returns an error without affecting the others):
   - [Codex CLI](https://github.com/openai/codex) — `npm install -g @openai/codex`
   - [Gemini CLI](https://github.com/google-gemini/gemini-cli) — `npm install -g @google/gemini-cli`
-  - [Claude Code](https://github.com/anthropics/claude-code) — `curl -fsSL https://claude.ai/install.sh | bash` 或 `brew install --cask claude-code`
+  - [Claude Code](https://github.com/anthropics/claude-code) — `curl -fsSL https://claude.ai/install.sh | bash` or `brew install --cask claude-code`
 
-## 🔌 安装与配置
+## 🔌 Installation & Configuration
 
 ### Claude Code
 
 ```bash
-# 从 Git 直接安装（推荐）
+# Install from Git (recommended)
 claude mcp add super -s user --transport stdio -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.git superai-mcp
 
-# 或 clone 后本地安装
+# Or clone and install locally
 git clone https://github.com/babywbx/SuperAI-MCP.git
 claude mcp add super -s user --transport stdio -- uv run --directory /path/to/SuperAI-MCP superai-mcp
 ```
 
 <details>
-<summary>手动编辑配置文件</summary>
+<summary>Edit config manually</summary>
 
-在 `~/.claude/mcp.json`（全局）或 `.mcp.json`（项目级）中添加：
+Add to `~/.claude/mcp.json` (global) or `.mcp.json` (project-level):
 
 ```json
 {
@@ -60,9 +69,9 @@ claude mcp add super -s user --transport stdio -- uv run --directory /path/to/Su
 </details>
 
 <details>
-<summary>可选：自动允许工具调用（免去每次确认）</summary>
+<summary>Optional: auto-allow tool calls (skip confirmation prompts)</summary>
 
-在 `~/.claude/settings.json` 中添加：
+Add to `~/.claude/settings.json`:
 
 ```json
 {
@@ -74,13 +83,13 @@ claude mcp add super -s user --transport stdio -- uv run --directory /path/to/Su
 }
 ```
 
-也可以只允许特定工具：`"mcp__super__codex"`、`"mcp__super__gemini"`、`"mcp__super__claude"`、`"mcp__super__broadcast"`、`"mcp__super__chain"`、`"mcp__super__vote"`、`"mcp__super__debate"`、`"mcp__super__list-models"`、`"mcp__super__status"`、`"mcp__super__usage"`。
+You can also allow specific tools only: `"mcp__super__codex"`, `"mcp__super__gemini"`, `"mcp__super__claude"`, `"mcp__super__broadcast"`, `"mcp__super__chain"`, `"mcp__super__vote"`, `"mcp__super__debate"`, `"mcp__super__list-models"`, `"mcp__super__status"`, `"mcp__super__usage"`.
 
 </details>
 
 ### Codex CLI
 
-在 `~/.codex/config.toml` 中添加：
+Add to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.super]
@@ -95,9 +104,9 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 ```
 
 <details>
-<summary>手动编辑配置文件</summary>
+<summary>Edit config manually</summary>
 
-在 `~/.gemini/settings.json` 中添加：
+Add to `~/.gemini/settings.json`:
 
 ```json
 {
@@ -112,197 +121,197 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 
 </details>
 
-配置后重启对应 CLI 即可使用。
+Restart the CLI after configuration.
 
-## 🛠️ 工具参数
+## 🛠️ Tool Parameters
 
 ### `codex`
 
-| 参数 | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| `prompt` | str | 必填 | 任务指令 |
-| `cd` | str | 必填 | 工作目录 |
-| `session_id` | str | `""` | 会话续接 |
-| `sandbox` | str | `"read-only"` | 沙盒模式 |
-| `model` | str | `""` | 模型名 |
-| `reasoning_effort` | str | `""` | 推理深度: low/medium/high/xhigh |
-| `review_uncommitted` | bool | `False` | 审查未提交更改 |
-| `review_base` | str | `""` | 审查相对于某分支的更改 |
-| `review_commit` | str | `""` | 审查特定 commit (7-40 位 hex SHA) |
-| `files` | list[str] | `None` | 文件列表模式 |
-| `return_all_messages` | bool | `False` | 返回完整事件流 |
-| `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
-| `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
-| `timeout` | float | `300` | 超时秒数 |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prompt` | str | required | Task instruction |
+| `cd` | str | required | Working directory |
+| `session_id` | str | `""` | Resume session |
+| `sandbox` | str | `"read-only"` | Sandbox mode |
+| `model` | str | `""` | Model name |
+| `reasoning_effort` | str | `""` | Reasoning depth: low/medium/high/xhigh |
+| `review_uncommitted` | bool | `False` | Review uncommitted changes |
+| `review_base` | str | `""` | Review changes vs a branch |
+| `review_commit` | str | `""` | Review specific commit (7-40 hex SHA) |
+| `files` | list[str] | `None` | File list mode |
+| `return_all_messages` | bool | `False` | Return full event stream |
+| `auto_split` | bool | `False` | Auto-split large task into subtasks |
+| `system_prompt` | str | `""` | System-level instruction (injected as `<system>` tag) |
+| `timeout` | float | `300` | Timeout in seconds |
 
 ### `gemini`
 
-| 参数 | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| `prompt` | str | 必填 | 任务指令 |
-| `cd` | str | 必填 | 工作目录 |
-| `session_id` | str | `""` | 会话续接 |
-| `sandbox` | bool | `True` | 是否沙盒 |
-| `model` | str | `""` | 模型名/别名 (pro, flash 等) |
-| `review_uncommitted` | bool | `False` | 审查未提交更改 |
-| `review_base` | str | `""` | 审查相对于某分支的更改 |
-| `review_commit` | str | `""` | 审查特定 commit (7-40 位 hex SHA) |
-| `files` | list[str] | `None` | 文件列表模式 |
-| `return_all_messages` | bool | `False` | 返回完整事件流 |
-| `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
-| `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
-| `timeout` | float | `300` | 超时秒数 |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prompt` | str | required | Task instruction |
+| `cd` | str | required | Working directory |
+| `session_id` | str | `""` | Resume session |
+| `sandbox` | bool | `True` | Enable sandbox |
+| `model` | str | `""` | Model name/alias (pro, flash, etc.) |
+| `review_uncommitted` | bool | `False` | Review uncommitted changes |
+| `review_base` | str | `""` | Review changes vs a branch |
+| `review_commit` | str | `""` | Review specific commit (7-40 hex SHA) |
+| `files` | list[str] | `None` | File list mode |
+| `return_all_messages` | bool | `False` | Return full event stream |
+| `auto_split` | bool | `False` | Auto-split large task into subtasks |
+| `system_prompt` | str | `""` | System-level instruction (injected as `<system>` tag) |
+| `timeout` | float | `300` | Timeout in seconds |
 
 ### `claude`
 
-| 参数 | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| `prompt` | str | 必填 | 任务指令 |
-| `cd` | str | 必填 | 工作目录 |
-| `session_id` | str | `""` | 会话续接 (映射到 --resume) |
-| `sandbox` | str | `"read-only"` | 沙盒模式 (映射到权限模式) |
-| `model` | str | `""` | 模型名 (opus/sonnet/haiku 等) |
-| `effort` | str | `""` | 推理深度: low/medium/high |
-| `max_budget_usd` | float | `0.0` | API 费用上限 (0=不限) |
-| `review_uncommitted` | bool | `False` | 审查未提交更改 |
-| `review_base` | str | `""` | 审查相对于某分支的更改 |
-| `review_commit` | str | `""` | 审查特定 commit (7-40 位 hex SHA) |
-| `files` | list[str] | `None` | 文件列表模式 |
-| `return_all_messages` | bool | `False` | 返回完整 JSON |
-| `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
-| `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
-| `timeout` | float | `300` | 超时秒数 |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prompt` | str | required | Task instruction |
+| `cd` | str | required | Working directory |
+| `session_id` | str | `""` | Resume session (maps to --resume) |
+| `sandbox` | str | `"read-only"` | Sandbox mode (maps to permission mode) |
+| `model` | str | `""` | Model name (opus/sonnet/haiku, etc.) |
+| `effort` | str | `""` | Effort level: low/medium/high |
+| `max_budget_usd` | float | `0.0` | API cost limit (0=unlimited) |
+| `review_uncommitted` | bool | `False` | Review uncommitted changes |
+| `review_base` | str | `""` | Review changes vs a branch |
+| `review_commit` | str | `""` | Review specific commit (7-40 hex SHA) |
+| `files` | list[str] | `None` | File list mode |
+| `return_all_messages` | bool | `False` | Return full JSON |
+| `auto_split` | bool | `False` | Auto-split large task into subtasks |
+| `system_prompt` | str | `""` | System-level instruction (injected as `<system>` tag) |
+| `timeout` | float | `300` | Timeout in seconds |
 
 ### `broadcast`
 
-将同一 prompt 并发发送给多个 CLI，聚合返回结果。适用于对比不同 AI 的回答。
+Broadcast the same prompt to multiple CLIs in parallel, returning aggregated results. Useful for comparing answers across different AI models.
 
-| 参数 | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| `prompt` | str | 必填 | 任务指令 |
-| `cd` | str | 必填 | 工作目录 |
-| `targets` | list[str] | `None` | 目标 CLI 列表，空=全部 (`codex`, `gemini`, `claude`) |
-| `model` | str | `""` | 传给所有 CLI 的模型名 (全局覆盖) |
-| `models` | dict[str,str] | `None` | 按 CLI 指定模型，如 `{"gemini": "gemini-3.1-pro-preview"}` |
-| `review_uncommitted` | bool | `False` | 审查未提交更改 |
-| `review_base` | str | `""` | 审查相对于某分支的更改 |
-| `review_commit` | str | `""` | 审查特定 commit (7-40 位 hex SHA) |
-| `files` | list[str] | `None` | 文件列表模式 |
-| `return_all_messages` | bool | `False` | 返回完整事件流 |
-| `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
-| `timeout` | float | `300` | 超时秒数 |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prompt` | str | required | Task instruction |
+| `cd` | str | required | Working directory |
+| `targets` | list[str] | `None` | Target CLIs, empty=all (`codex`, `gemini`, `claude`) |
+| `model` | str | `""` | Model name passed to all CLIs (global override) |
+| `models` | dict[str,str] | `None` | Per-CLI model override, e.g. `{"gemini": "gemini-3.1-pro-preview"}` |
+| `review_uncommitted` | bool | `False` | Review uncommitted changes |
+| `review_base` | str | `""` | Review changes vs a branch |
+| `review_commit` | str | `""` | Review specific commit (7-40 hex SHA) |
+| `files` | list[str] | `None` | File list mode |
+| `return_all_messages` | bool | `False` | Return full event stream |
+| `system_prompt` | str | `""` | System-level instruction (injected as `<system>` tag) |
+| `timeout` | float | `300` | Timeout in seconds |
 
 ### `chain`
 
-顺序多模型流水线。每步的输出自动注入下一步（以 `<previous_output>` 标签包裹）。首个失败即停止并返回部分结果。
+Sequential multi-model pipeline. Each step's output is auto-injected into the next (wrapped in `<previous_output>` tags). Stops on first failure and returns partial results.
 
-| 参数 | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| `steps` | list[dict] | 必填 | 步骤列表，每个 `{target, prompt, model?}` |
-| `cd` | str | 必填 | 工作目录 |
-| `system_prompt` | str | `""` | 系统级指令 |
-| `timeout` | float | `300` | 总超时秒数 (端到端预算) |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `steps` | list[dict] | required | Steps list, each `{target, prompt, model?}` |
+| `cd` | str | required | Working directory |
+| `system_prompt` | str | `""` | System-level instruction |
+| `timeout` | float | `300` | Total timeout in seconds (end-to-end budget) |
 
 ### `vote`
 
-并行发给多个候选模型，再由评审模型选出最佳答案。
+Send prompt to multiple candidate models in parallel, then have a judge model pick the best answer.
 
-| 参数 | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| `prompt` | str | 必填 | 任务指令 |
-| `cd` | str | 必填 | 工作目录 |
-| `candidates` | list[str] | `None` | 候选 CLI，空=全部 |
-| `judge` | str | `"claude"` | 评审 CLI (自动从候选中排除) |
-| `model` | str | `""` | 模型名 |
-| `system_prompt` | str | `""` | 系统级指令 |
-| `timeout` | float | `300` | 总超时秒数 |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prompt` | str | required | Task instruction |
+| `cd` | str | required | Working directory |
+| `candidates` | list[str] | `None` | Candidate CLIs, empty=all |
+| `judge` | str | `"claude"` | Judge CLI (auto-excluded from candidates) |
+| `model` | str | `""` | Model name |
+| `system_prompt` | str | `""` | System-level instruction |
+| `timeout` | float | `300` | Total timeout in seconds |
 
 ### `debate`
 
-两个模型交替辩论，每轮看到对手的上一轮回答（以 `<opponent_response>` 标签包裹）。
+Alternating debate between two models over multiple rounds. Each round sees the opponent's previous response (wrapped in `<opponent_response>` tags).
 
-| 参数 | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| `prompt` | str | 必填 | 辩题/任务指令 |
-| `cd` | str | 必填 | 工作目录 |
-| `side_a` | str | `"codex"` | 正方 CLI |
-| `side_b` | str | `"claude"` | 反方 CLI |
-| `rounds` | int | `3` | 辩论轮数 |
-| `model` | str | `""` | 模型名 |
-| `system_prompt` | str | `""` | 系统级指令 |
-| `timeout` | float | `300` | 总超时秒数 |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prompt` | str | required | Debate topic / task instruction |
+| `cd` | str | required | Working directory |
+| `side_a` | str | `"codex"` | Side A CLI |
+| `side_b` | str | `"claude"` | Side B CLI |
+| `rounds` | int | `3` | Number of debate rounds |
+| `model` | str | `""` | Model name |
+| `system_prompt` | str | `""` | System-level instruction |
+| `timeout` | float | `300` | Total timeout in seconds |
 
 ### `list-models`
 
-查询 OpenRouter 上三家（OpenAI、Google、Anthropic）的可用模型列表。无需 API key，结果缓存 5 分钟。
+Query available models from OpenRouter (covers OpenAI, Google, Anthropic). No API key needed, results cached for 5 minutes.
 
-| 参数 | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| `provider` | str | `""` | 按厂商过滤: `openai`、`google`、`anthropic`，空=三家全部 |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `provider` | str | `""` | Filter by provider: `openai`, `google`, `anthropic`, or empty for all |
 
-返回的 `model_id` 字段可直接作为其他工具的 `model` 参数使用。自动过滤掉 CLI 不兼容的变体（image、customtools、gemma、:free 等）。
+The returned `model_id` can be used directly as the `model` parameter for other tools. Automatically filters out CLI-incompatible variants (image, customtools, gemma, :free, etc.).
 
-> **⚠️ 注意**: 数据来自 OpenRouter，**不保证所有返回的模型都能在对应 CLI 中使用**。这是一个辅助发现功能，实际可用性以各 CLI 为准。截至 2026-03，已验证可用的最新模型：
+> **⚠️ Note**: Data comes from OpenRouter — **not all returned models are guaranteed to work with the corresponding CLI**. This is a discovery aid; actual availability depends on each CLI. As of March 2026, verified latest models:
 >
-> | CLI | 最新可用模型 |
-> |-----|-------------|
+> | CLI | Latest Verified Model |
+> |-----|----------------------|
 > | Gemini | `gemini-3.1-pro-preview` |
 > | Codex | `gpt-5.3-codex` |
 > | Claude | `claude-opus-4-6` |
 
 ### `status`
 
-检查所有 CLI 的可用性、版本和认证状态。无参数。
+Check availability, version, and authentication status of all CLI tools. No parameters.
 
 ### `usage`
 
-查看累计的 token 用量和调用次数。
+Show cumulative token usage and call counts across all CLI tools.
 
-| 参数 | 类型 | 默认 | 说明 |
-|------|------|------|------|
-| `reset` | bool | `False` | 读取后清零计数器 |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `reset` | bool | `False` | Clear counters after reading |
 
-## 🔍 模型校验
+## 🔍 Model Validation
 
-传入 `model` 参数时，工具会先通过 OpenRouter 缓存校验模型是否存在。这同样是辅助功能——通过校验不代表 CLI 一定支持，但**未通过校验的模型大概率是拼写错误**。
+When a `model` parameter is provided, the tool validates the model name against an OpenRouter cache. This is an advisory feature — passing validation doesn't guarantee CLI support, but **failing validation likely indicates a typo**.
 
-- **模型存在** → 正常执行
-- **模型不存在** → 秒返回错误 + 推荐相似模型名
-- **短别名** (`flash`、`pro`、`sonnet`、`haiku`、`opus`) → 跳过校验，直接走 CLI
-- **OpenRouter 不可达** → 静默跳过校验，不影响主流程
+- **Model exists** → proceed normally
+- **Model not found** → instant error + similar model suggestions
+- **Short aliases** (`flash`, `pro`, `sonnet`, `haiku`, `opus`) → bypass validation, pass directly to CLI
+- **OpenRouter unreachable** → silently skip validation, don't block the request
 
-## 🚦 使用模式
+## 🚦 Usage Modes
 
 ```
-1️⃣ 默认模式 — prompt 直接转发给 CLI
-2️⃣ Review 模式 — 自动获取 git diff 注入 prompt (uncommitted / base / commit)
-3️⃣ 文件模式 — 读取文件内容注入 prompt
+1️⃣ Default — prompt forwarded directly to CLI
+2️⃣ Review — auto-fetch git diff and inject into prompt (uncommitted / base / commit)
+3️⃣ Files — read file contents and inject into prompt
 ```
 
-## 🔄 配额/限流回退
+## 🔄 Rate-Limit Fallback
 
-当 CLI 返回限流错误（`RESOURCE_EXHAUSTED`、`overloaded_error`、`429`、`rate_limit`、`quota` 等）时，会自动级联降级重试。降级前先发一个短探测请求验证目标可用。
+When a CLI returns a rate-limit error (`RESOURCE_EXHAUSTED`, `overloaded_error`, `429`, `rate_limit`, `quota`, etc.), the tool automatically cascades to a fallback. Before fallback, a short probe request verifies the target is reachable.
 
-| CLI | 回退策略 | 示例 |
-|-----|---------|------|
-| **Gemini** | 切换为 `flash` 模型 | `pro` → `flash` |
-| **Claude** | 按模型降级 | 当前模型 → `sonnet` → `haiku` |
-| **Codex** | 降低推理深度 | `high` → `medium` → `low` |
+| CLI | Fallback Strategy | Example |
+|-----|-------------------|---------|
+| **Gemini** | Switch to `flash` model | `pro` → `flash` |
+| **Claude** | Model downgrade | current → `sonnet` → `haiku` |
+| **Codex** | Reduce reasoning effort | `high` → `medium` → `low` |
 
-成功时响应内容以 `[fallback: ...]` 前缀标注（如 `[fallback: sonnet]`、`[fallback: effort=medium]`）。
-如果已处于链末端（Gemini 已用 `flash`、Claude 已用 `haiku`、Codex 已用 `low`），不会重试。
+On success, the response is prefixed with `[fallback: ...]` (e.g. `[fallback: sonnet]`, `[fallback: effort=medium]`).
+If already at the end of the chain (Gemini already on `flash`, Claude on `haiku`, Codex on `low`), no retry is attempted.
 
-## 📡 进度通知
+## 📡 Progress Notifications
 
-CLI 执行期间每 5 秒通过 MCP `report_progress` 发送一次心跳通知，包含已运行时间和当前状态摘要。
-防止长时间任务时客户端误判超时断开连接。
+During CLI execution, an MCP `report_progress` keepalive is sent every 5 seconds, including elapsed time and a current status summary.
+This prevents clients from timing out and disconnecting during long-running tasks.
 
-## 🧪 测试
+## 🧪 Testing
 
 ```bash
 uv run pytest -v
 ```
 
-## 📄 许可
+## 📄 License
 
 Apache-2.0 License © 2026 [Babywbx](https://github.com/babywbx)
