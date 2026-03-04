@@ -4,16 +4,20 @@
 
 ## ✨ 特性
 
-- 🔧 **五工具**: `codex` + `gemini` + `claude` + `broadcast` + `list-models`
-- 📋 **四种模式**: prompt 转发 / git diff review / 文件列表 review / commit 审查
+- 🔧 **十工具**: `codex` + `gemini` + `claude` + `broadcast` + `chain` + `vote` + `debate` + `list-models` + `status` + `usage`
+- 📋 **五种模式**: prompt 转发 / git diff review (uncommitted/base/commit) / 文件列表 review
 - 🔄 **会话续接**: 通过 `session_id` 延续上下文
 - 🎯 **模型选择**: 支持指定模型和推理深度
 - ⚡ **纯异步**: 基于 `asyncio.create_subprocess_exec`，无线程
 - 🔍 **模型发现**: `list-models` 实时查询可用模型，`model` 参数自动校验+纠错建议
-- 🔒 **安全**: 路径遍历防护、git ref 校验、无 shell 注入
-- 📡 **进度通知**: 长时间任务每 25s 发送 `report_progress` keepalive
+- 🔒 **安全**: 路径遍历防护、git ref 校验、无 shell 注入、嵌套深度限制 (最大 5 层)
+- 📡 **进度通知**: 长时间任务每 5s 发送 `report_progress` keepalive
+- ⏱️ **超时+宽限期**: 默认 300s 超时，CLI 活跃输出时自动延长 (30s 新输出 / 120s 关键词匹配)
 - 🔄 **配额回退**: 限流时自动级联降级（Gemini→flash / Claude→sonnet→haiku / Codex effort 降级）
+- 📝 **系统提示**: `system_prompt` 参数注入系统级指令
+- 📦 **大 prompt 支持**: >200KB 自动通过 stdin 传递，避免 OS ARG_MAX 限制
 - 🏷️ **工具注解**: 每个工具附带 `ToolAnnotations` 元数据
+- 🤝 **多模型协作**: `chain` 流水线 / `vote` 投票共识 / `debate` 辩论迭代
 
 ## 📦 前置依赖
 
@@ -70,7 +74,7 @@ claude mcp add super -s user --transport stdio -- uv run --directory /path/to/Su
 }
 ```
 
-也可以只允许特定工具：`"mcp__super__codex"`、`"mcp__super__gemini"`、`"mcp__super__claude"`、`"mcp__super__broadcast"`、`"mcp__super__list-models"`。
+也可以只允许特定工具：`"mcp__super__codex"`、`"mcp__super__gemini"`、`"mcp__super__claude"`、`"mcp__super__broadcast"`、`"mcp__super__chain"`、`"mcp__super__vote"`、`"mcp__super__debate"`、`"mcp__super__list-models"`、`"mcp__super__status"`、`"mcp__super__usage"`。
 
 </details>
 
@@ -128,6 +132,8 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `files` | list[str] | `None` | 文件列表模式 |
 | `return_all_messages` | bool | `False` | 返回完整事件流 |
 | `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
+| `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
+| `timeout` | float | `300` | 超时秒数 |
 
 ### `gemini`
 
@@ -144,6 +150,8 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `files` | list[str] | `None` | 文件列表模式 |
 | `return_all_messages` | bool | `False` | 返回完整事件流 |
 | `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
+| `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
+| `timeout` | float | `300` | 超时秒数 |
 
 ### `claude`
 
@@ -162,6 +170,8 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `files` | list[str] | `None` | 文件列表模式 |
 | `return_all_messages` | bool | `False` | 返回完整 JSON |
 | `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
+| `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
+| `timeout` | float | `300` | 超时秒数 |
 
 ### `broadcast`
 
@@ -172,12 +182,55 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `prompt` | str | 必填 | 任务指令 |
 | `cd` | str | 必填 | 工作目录 |
 | `targets` | list[str] | `None` | 目标 CLI 列表，空=全部 (`codex`, `gemini`, `claude`) |
-| `model` | str | `""` | 传给各 CLI 的模型名 |
+| `model` | str | `""` | 传给所有 CLI 的模型名 (全局覆盖) |
+| `models` | dict[str,str] | `None` | 按 CLI 指定模型，如 `{"gemini": "gemini-3.1-pro-preview"}` |
 | `review_uncommitted` | bool | `False` | 审查未提交更改 |
 | `review_base` | str | `""` | 审查相对于某分支的更改 |
 | `review_commit` | str | `""` | 审查特定 commit (7-40 位 hex SHA) |
 | `files` | list[str] | `None` | 文件列表模式 |
 | `return_all_messages` | bool | `False` | 返回完整事件流 |
+| `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
+| `timeout` | float | `300` | 超时秒数 |
+
+### `chain`
+
+顺序多模型流水线。每步的输出自动注入下一步（以 `<previous_output>` 标签包裹）。首个失败即停止并返回部分结果。
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `steps` | list[dict] | 必填 | 步骤列表，每个 `{target, prompt, model?}` |
+| `cd` | str | 必填 | 工作目录 |
+| `system_prompt` | str | `""` | 系统级指令 |
+| `timeout` | float | `300` | 总超时秒数 (端到端预算) |
+
+### `vote`
+
+并行发给多个候选模型，再由评审模型选出最佳答案。
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `prompt` | str | 必填 | 任务指令 |
+| `cd` | str | 必填 | 工作目录 |
+| `candidates` | list[str] | `None` | 候选 CLI，空=全部 |
+| `judge` | str | `"claude"` | 评审 CLI (自动从候选中排除) |
+| `model` | str | `""` | 模型名 |
+| `system_prompt` | str | `""` | 系统级指令 |
+| `timeout` | float | `300` | 总超时秒数 |
+
+### `debate`
+
+两个模型交替辩论，每轮看到对手的上一轮回答（以 `<opponent_response>` 标签包裹）。
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `prompt` | str | 必填 | 辩题/任务指令 |
+| `cd` | str | 必填 | 工作目录 |
+| `side_a` | str | `"codex"` | 正方 CLI |
+| `side_b` | str | `"claude"` | 反方 CLI |
+| `rounds` | int | `3` | 辩论轮数 |
+| `model` | str | `""` | 模型名 |
+| `system_prompt` | str | `""` | 系统级指令 |
+| `timeout` | float | `300` | 总超时秒数 |
 
 ### `list-models`
 
@@ -196,6 +249,18 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 > | Gemini | `gemini-3.1-pro-preview` |
 > | Codex | `gpt-5.3-codex` |
 > | Claude | `claude-opus-4-6` |
+
+### `status`
+
+检查所有 CLI 的可用性、版本和认证状态。无参数。
+
+### `usage`
+
+查看累计的 token 用量和调用次数。
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `reset` | bool | `False` | 读取后清零计数器 |
 
 ## 🔍 模型校验
 
@@ -229,7 +294,7 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 
 ## 📡 进度通知
 
-CLI 执行期间每 25 秒通过 MCP `report_progress` 发送一次心跳通知，包含已运行时间。
+CLI 执行期间每 5 秒通过 MCP `report_progress` 发送一次心跳通知，包含已运行时间和当前状态摘要。
 防止长时间任务时客户端误判超时断开连接。
 
 ## 🧪 测试
