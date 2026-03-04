@@ -1022,6 +1022,8 @@ async def chain_tool(
 
     # Validate all targets upfront
     for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            return _err(f"step {i}: must be a dict, got {type(step).__name__}")
         target = step.get("target", "")
         if target not in _TARGET_FNS:
             return _err(f"step {i}: invalid target {target!r}, must be one of {list(_ALL_TARGETS)}")
@@ -1048,6 +1050,7 @@ async def chain_tool(
         kwargs: dict[str, object] = {
             "prompt": prompt,
             "cd": cd,
+            "ctx": ctx,
             "system_prompt": system_prompt if i == 0 else "",
             "timeout": remaining,
         }
@@ -1071,7 +1074,9 @@ async def chain_tool(
 
         prev_output = content
 
-    all_ok = all(s.get("success") for s in completed)
+    if not completed:
+        return json.dumps({"success": False, "steps": [], "final_content": "timeout before any step ran"})
+    all_ok = bool(completed) and all(s.get("success") for s in completed)
     final = completed[-1]["content"] if completed else ""
     return json.dumps({"success": all_ok, "steps": completed, "final_content": final})
 
@@ -1135,7 +1140,7 @@ async def vote_tool(
         target = effective_candidates[0]
         fn = _TARGET_FNS[target]
         try:
-            raw = await fn(prompt=prompt, cd=cd, system_prompt=system_prompt,
+            raw = await fn(prompt=prompt, cd=cd, ctx=ctx, system_prompt=system_prompt,
                           timeout=deadline - time.monotonic(), model=model)
             result = json.loads(raw)
             return json.dumps({
@@ -1156,6 +1161,7 @@ async def vote_tool(
     candidate_kwargs: dict[str, object] = {
         "prompt": prompt,
         "cd": cd,
+        "ctx": ctx,
         "system_prompt": system_prompt,
         "timeout": (deadline - time.monotonic()) * 0.7,  # 70% budget for candidates
         "model": model,
@@ -1190,10 +1196,10 @@ async def vote_tool(
     )
 
     judge_fn = _TARGET_FNS[judge]
-    remaining = deadline - time.monotonic()
+    remaining = max(1.0, deadline - time.monotonic())
     try:
         judge_raw = await judge_fn(
-            prompt=judge_prompt, cd=cd, timeout=max(30.0, remaining), model=model,
+            prompt=judge_prompt, cd=cd, ctx=ctx, timeout=remaining, model=model,
         )
         judge_result = json.loads(judge_raw)
         judge_reasoning = judge_result.get("content", "")
@@ -1268,7 +1274,7 @@ async def debate_tool(
         fn = _TARGET_FNS[side]
         try:
             raw = await fn(
-                prompt=round_prompt, cd=cd,
+                prompt=round_prompt, cd=cd, ctx=ctx,
                 system_prompt=system_prompt if i == 0 else "",
                 timeout=remaining, model=model,
             )
@@ -1298,7 +1304,11 @@ async def debate_tool(
 
         prev_content = content
 
-    final = round_results[-1]["content"] if round_results else ""
+    if not round_results:
+        return json.dumps({
+            "success": False, "rounds": [], "final_answer": "timeout before any round ran",
+        })
+    final = round_results[-1]["content"]
     return json.dumps({
         "success": True,
         "rounds": round_results,
