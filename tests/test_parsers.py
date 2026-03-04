@@ -460,3 +460,18 @@ class TestGeminiParser:
         assert r.success is True
         assert r.content == "Hi"
         assert r.session_id == "x"
+
+    def test_tool_use_clears_chunks(self) -> None:
+        """tool_use event (real Gemini format) clears accumulated chunks."""
+        lines = [
+            '{"type":"init","session_id":"t1","model":"gemini-3"}',
+            '{"type":"message","role":"assistant","content":"Let me check...","delta":true}',
+            '{"type":"tool_use","tool_name":"read_file","tool_id":"rf_1"}',
+            '{"type":"tool_result","tool_id":"rf_1","status":"success","output":"data"}',
+            '{"type":"message","role":"assistant","content":"The answer is 42.","delta":true}',
+            '{"type":"result","status":"success","stats":{"input_tokens":100}}',
+        ]
+        r = parse_gemini_output(lines)
+        assert r.success is True
+        assert r.content == "The answer is 42."
+        assert "Let me check" not in r.content

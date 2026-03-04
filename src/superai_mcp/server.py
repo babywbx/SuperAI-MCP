@@ -218,10 +218,15 @@ def _summarize_line(line: str) -> str:
         return "assistant"
 
     # Gemini stream-json events
-    if "role" in obj and obj.get("role") == "assistant":
-        content = obj.get("content", "")
-        if content:
-            return f"assistant: {content}"[:_MAX_SNIPPET]
+    if event_type == "message":
+        role = obj.get("role", "")
+        if role == "assistant":
+            content = obj.get("content", "")
+            if content:
+                return f"assistant: {content}"[:_MAX_SNIPPET]
+            return "assistant"
+        # Suppress user message echo and other non-assistant roles
+        return ""
 
     if event_type == "init":
         model_name = obj.get("model", "")
@@ -232,8 +237,8 @@ def _summarize_line(line: str) -> str:
         return f"result: {status}"[:_MAX_SNIPPET] if status else "result"
 
     # Gemini tool events — show concise summary, not raw JSON
-    if event_type == "tool_call":
-        name = obj.get("name", "")
+    if event_type in ("tool_call", "tool_use"):
+        name = obj.get("name", "") or obj.get("tool_name", "")
         return f"tool_call: {name}"[:_MAX_SNIPPET] if name else "tool_call"
 
     if event_type == "tool_result":

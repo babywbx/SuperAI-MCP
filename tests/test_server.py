@@ -140,8 +140,16 @@ class TestSummarizeLine:
     # -- Gemini events --
 
     def test_gemini_assistant_message(self) -> None:
-        line = json.dumps({"role": "assistant", "content": "The function should..."})
+        line = json.dumps({"type": "message", "role": "assistant", "content": "The function should..."})
         assert _summarize_line(line) == "assistant: The function should..."
+
+    def test_gemini_user_message_suppressed(self) -> None:
+        line = json.dumps({"type": "message", "role": "user", "content": "say hello"})
+        assert _summarize_line(line) == ""
+
+    def test_gemini_tool_use(self) -> None:
+        line = json.dumps({"type": "tool_use", "tool_name": "read_file", "tool_id": "123"})
+        assert _summarize_line(line) == "tool_call: read_file"
 
     def test_gemini_init(self) -> None:
         line = json.dumps({"type": "init", "model": "gemini-3.1-pro"})
@@ -187,7 +195,7 @@ class TestSummarizeLine:
 
     def test_truncation_gemini_assistant(self) -> None:
         long_content = "b" * 200
-        line = json.dumps({"role": "assistant", "content": long_content})
+        line = json.dumps({"type": "message", "role": "assistant", "content": long_content})
         result = _summarize_line(line)
         assert len(result) == _MAX_SNIPPET
         assert result.startswith("assistant: ")
