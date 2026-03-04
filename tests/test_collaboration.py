@@ -151,3 +151,122 @@ class TestChainTool:
         # system_prompt passed to first step, empty for subsequent
         assert calls[0]["system_prompt"] == "be concise"
         assert calls[1]["system_prompt"] == ""
+
+
+from superai_mcp.server import vote_tool
+
+
+class TestVoteTool:
+    async def test_basic_vote(self) -> None:
+        async def fake_codex(**kwargs) -> str:
+            return _ok("answer A")
+
+        async def fake_claude(**kwargs) -> str:
+            return _ok("answer B")
+
+        async def fake_gemini(**kwargs) -> str:
+            return _ok("answer C")
+
+        # Judge (claude) picks winner from candidates
+        # Patch the judge call separately — vote calls candidates first,
+        # then calls judge. We handle this by making claude return different
+        # things on first vs second call.
+        call_count = {"claude": 0}
+
+        async def claude_multi(**kwargs) -> str:
+            call_count["claude"] += 1
+            if call_count["claude"] == 1:
+                return _ok("answer B")  # candidate
+            return _ok("Candidate B is best.")  # judge
+
+        with patch("superai_mcp.server._TARGET_FNS", {
+            "codex": fake_codex,
+            "claude": claude_multi,
+            "gemini": fake_gemini,
+        }):
+            raw = await vote_tool(
+                prompt="What is the best approach?",
+                cd="/tmp",
+            )
+        result = json.loads(raw)
+        assert result["success"]
+        assert "candidates" in result
+        assert "judge_reasoning" in result
+
+    async def test_custom_candidates_and_judge(self) -> None:
+        async def fake_codex(**kwargs) -> str:
+            return _ok("codex answer")
+
+        async def fake_gemini(**kwargs) -> str:
+            return _ok("gemini answer")
+
+        async def fake_claude(**kwargs) -> str:
+            return _ok("Claude picks Candidate A.")
+
+        with patch("superai_mcp.server._TARGET_FNS", {
+            "codex": fake_codex,
+            "gemini": fake_gemini,
+            "claude": fake_claude,
+        }):
+            raw = await vote_tool(
+                prompt="solve this",
+                candidates=["codex", "gemini"],
+                judge="claude",
+                cd="/tmp",
+            )
+        result = json.loads(raw)
+        assert result["success"]
+        assert "codex" in result["candidates"]
+        assert "gemini" in result["candidates"]
+
+    async def test_judge_same_as_candidate_excluded(self) -> None:
+        """If judge is in candidates, it should be auto-excluded from candidates."""
+        call_targets: list[str] = []
+
+        async def fake_codex(**kwargs) -> str:
+            call_targets.append("codex")
+            return _ok("codex answer")
+
+        async def fake_claude(**kwargs) -> str:
+            call_targets.append("claude")
+            return _ok("claude answer")
+
+        with patch("superai_mcp.server._TARGET_FNS", {
+            "codex": fake_codex,
+            "claude": fake_claude,
+        }):
+            raw = await vote_tool(
+                prompt="solve",
+                candidates=["codex", "claude"],
+                judge="claude",
+                cd="/tmp",
+            )
+        result = json.loads(raw)
+        assert result["success"]
+
+    async def test_single_candidate_skips_voting(self) -> None:
+        async def fake_codex(**kwargs) -> str:
+            return _ok("only answer")
+
+        with patch("superai_mcp.server._TARGET_FNS", {
+            "codex": fake_codex,
+        }):
+            raw = await vote_tool(
+                prompt="solve",
+                candidates=["codex"],
+                judge="codex",
+                cd="/tmp",
+            )
+        result = json.loads(raw)
+        assert result["success"]
+        # With only 1 candidate, skip judging — return directly
+        assert result["final_content"] == "only answer"
+
+    async def test_invalid_judge(self) -> None:
+        raw = await vote_tool(
+            prompt="solve",
+            judge="invalid",
+            cd="/tmp",
+        )
+        result = json.loads(raw)
+        assert not result["success"]
