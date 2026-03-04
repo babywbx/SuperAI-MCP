@@ -102,6 +102,13 @@ def _track_usage(cli: str, usage: dict[str, object] | None) -> None:
             _usage[cli][key] += int(val)
 
 
+def _normalize_gemini_model(model: str) -> str:
+    """Gemini CLI doesn't support -flash-lite models; strip 'lite' suffix."""
+    if model and "-flash-lite" in model:
+        return model.replace("-flash-lite", "-flash")
+    return model
+
+
 def _gemini_prompt_args(prompt: str) -> tuple[list[str], bytes | None]:
     """Build Gemini prompt args; large prompts go via stdin.
 
@@ -579,6 +586,7 @@ async def gemini_tool(
         validate_cd(cd)
         validate_session_id(session_id)
         validate_model(model)
+        model = _normalize_gemini_model(model)
         validate_commit_sha(review_commit)
         validate_files(files)
         validate_timeout(timeout)
