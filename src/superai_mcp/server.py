@@ -263,6 +263,13 @@ async def _build_context(
             else:
                 label = f"commit {review_commit}"
             parts.append(f"Below is the git diff ({label}):\n\n```diff\n{diff_text}\n```")
+        else:
+            if review_uncommitted:
+                parts.append("Note: review_uncommitted was requested but no uncommitted changes were found.")
+            elif review_base:
+                parts.append(f"Note: review_base={review_base!r} was requested but the diff is empty.")
+            else:
+                parts.append(f"Note: review_commit={review_commit!r} was requested but the diff is empty.")
 
     if files:
         parts.append(f"Below are the file contents:\n\n{read_files(files, cd)}")
@@ -954,6 +961,7 @@ async def broadcast_tool(
     base_kwargs: dict[str, object] = {
         "prompt": effective_prompt,
         "cd": cd,
+        "ctx": ctx,
         "review_uncommitted": False,
         "review_base": "",
         "review_commit": "",
@@ -985,7 +993,10 @@ async def broadcast_tool(
             target, data = pair
             results[target] = data
 
-    return json.dumps({"success": True, "results": results})
+    any_ok = any(
+        isinstance(v, dict) and v.get("success") for v in results.values()
+    )
+    return json.dumps({"success": any_ok, "results": results})
 
 
 # ---------------------------------------------------------------------------
@@ -1076,7 +1087,9 @@ async def chain_tool(
 
     if not completed:
         return json.dumps({"success": False, "steps": [], "final_content": "timeout before any step ran"})
-    all_ok = bool(completed) and all(s.get("success") for s in completed)
+    # Partial completion (timeout mid-chain) is a failure
+    all_done = len(completed) == len(steps)
+    all_ok = all_done and all(s.get("success") for s in completed)
     final = completed[-1]["content"] if completed else ""
     return json.dumps({"success": all_ok, "steps": completed, "final_content": final})
 
@@ -1126,7 +1139,7 @@ async def vote_tool(
     if judge not in _TARGET_FNS:
         return _err(f"invalid judge: {judge!r}, must be one of {list(_ALL_TARGETS)}")
 
-    effective_candidates = list(candidates) if candidates else list(_ALL_TARGETS)
+    effective_candidates = list(dict.fromkeys(candidates)) if candidates else list(_ALL_TARGETS)
 
     # Validate candidates
     invalid = [c for c in effective_candidates if c not in _TARGET_FNS]
@@ -1197,17 +1210,19 @@ async def vote_tool(
 
     judge_fn = _TARGET_FNS[judge]
     remaining = max(1.0, deadline - time.monotonic())
+    judge_ok = False
     try:
         judge_raw = await judge_fn(
             prompt=judge_prompt, cd=cd, ctx=ctx, timeout=remaining, model=model,
         )
         judge_result = json.loads(judge_raw)
         judge_reasoning = judge_result.get("content", "")
+        judge_ok = judge_result.get("success", False)
     except Exception as exc:
         judge_reasoning = f"Judge failed: {exc}"
 
     return json.dumps({
-        "success": True,
+        "success": judge_ok,
         "candidates": candidate_results,
         "judge_reasoning": judge_reasoning,
         "final_content": judge_reasoning,
@@ -1308,9 +1323,11 @@ async def debate_tool(
         return json.dumps({
             "success": False, "rounds": [], "final_answer": "timeout before any round ran",
         })
+    # Partial completion (timeout mid-debate) is a failure
+    all_done = len(round_results) == rounds
     final = round_results[-1]["content"]
     return json.dumps({
-        "success": True,
+        "success": all_done,
         "rounds": round_results,
         "final_answer": final,
     })
