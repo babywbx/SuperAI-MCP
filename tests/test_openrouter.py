@@ -309,24 +309,30 @@ class TestFetchModelsExcludesIncompatible:
 
 
 class TestCheckModel:
-    """check_model validates model names against OpenRouter data."""
+    """check_model is advisory — returns warning or None, never blocks."""
 
     async def test_valid_model_passes(self) -> None:
         with patch("superai_mcp.openrouter.urllib.request.urlopen", return_value=_mock_urlopen()):
             result = await check_model("gemini-2.5-pro", "gemini")
         assert result is None
 
-    async def test_invalid_model_returns_error(self) -> None:
+    async def test_unknown_model_returns_warning(self) -> None:
         with patch("superai_mcp.openrouter.urllib.request.urlopen", return_value=_mock_urlopen()):
-            result = await check_model("gemini-9999", "gemini")
+            result = await check_model("nonexistent-model", "gemini")
         assert result is not None
         assert "not found" in result
 
-    async def test_invalid_model_suggests_similar(self) -> None:
+    async def test_unknown_model_suggests_similar(self) -> None:
         with patch("superai_mcp.openrouter.urllib.request.urlopen", return_value=_mock_urlopen()):
-            result = await check_model("gemini-2.5", "gemini")
+            result = await check_model("2.5-pro", "gemini")
         assert result is not None
         assert "gemini-2.5-pro" in result
+
+    async def test_case_insensitive_match(self) -> None:
+        """Model name matching is case-insensitive."""
+        with patch("superai_mcp.openrouter.urllib.request.urlopen", return_value=_mock_urlopen()):
+            result = await check_model("Gemini-2.5-Pro", "gemini")
+        assert result is None
 
     async def test_alias_bypasses_check(self) -> None:
         # "flash" is a known Gemini alias — should pass without hitting OpenRouter
@@ -339,6 +345,7 @@ class TestCheckModel:
         with patch("superai_mcp.openrouter.urllib.request.urlopen") as mock:
             result = await check_model("sonnet", "claude")
         assert result is None
+        mock.assert_not_called()
         mock.assert_not_called()
 
     async def test_empty_model_passes(self) -> None:

@@ -97,14 +97,15 @@ def _simplify(m: dict) -> dict:
 
 
 async def check_model(model: str, cli: str) -> str | None:
-    """Validate model name against OpenRouter. Returns error message or None.
+    """Check model name against OpenRouter. Returns warning message or None.
 
-    Best-effort: if OpenRouter is unreachable, silently passes.
+    Advisory only — callers should NOT block on the result.
     Known short aliases (e.g. "sonnet", "flash") bypass the check.
     """
     if not model:
         return None
-    if model.lower() in CLI_ALIASES.get(cli, frozenset()):
+    lower = model.lower()
+    if lower in CLI_ALIASES.get(cli, frozenset()):
         return None
     provider = CLI_PROVIDERS.get(cli)
     if not provider:
@@ -113,14 +114,15 @@ async def check_model(model: str, cli: str) -> str | None:
     try:
         models = await fetch_models(provider)
     except Exception:
-        return None  # OpenRouter unreachable, skip validation
+        return None  # OpenRouter unreachable, skip
 
-    known = {m["model_id"] for m in models}
-    if model in known:
+    known_exact = {m["model_id"] for m in models}
+    # Case-insensitive match
+    known_lower = {m.lower(): m for m in known_exact}
+    if lower in known_lower or model in known_exact:
         return None
 
     # Suggest similar model names
-    lower = model.lower()
-    similar = sorted(m for m in known if lower in m.lower())[:5]
+    similar = sorted(m for m in known_exact if lower in m.lower())[:5]
     hint = f"similar: {', '.join(similar)}" if similar else f'use list-models(provider="{provider}")'
-    return f"model '{model}' not found for {cli}. {hint}"
+    return f"model '{model}' not found on OpenRouter for {cli}. {hint}"
