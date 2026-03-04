@@ -1076,6 +1076,138 @@ async def chain_tool(
     return json.dumps({"success": all_ok, "steps": completed, "final_content": final})
 
 
+_JUDGE_TEMPLATE = """\
+You are a judge evaluating multiple answers to the same question.
+
+## Original Question
+{prompt}
+
+## Candidate Answers
+{candidates_text}
+
+## Your Task
+Pick the BEST candidate. Reply with:
+1. "Winner: Candidate X" (where X is A, B, C, etc.)
+2. A brief explanation of why this answer is best.
+"""
+
+
+@mcp.tool(name="vote", annotations=ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False,
+))
+async def vote_tool(
+    prompt: str,
+    cd: str,
+    ctx: Context | None = None,
+    candidates: list[str] | None = None,
+    judge: str = "claude",
+    model: str = "",
+    system_prompt: str = "",
+    timeout: float = 300.0,
+) -> str:
+    """Send prompt to multiple models in parallel, then have a judge pick the best answer.
+
+    candidates: list of CLI targets to compete (default: all 3).
+    judge: which CLI judges the results (default: claude). Auto-excluded from candidates.
+    """
+    import time
+
+    try:
+        validate_cd(cd)
+        validate_timeout(timeout)
+    except ValueError as e:
+        return _err(str(e))
+
+    if judge not in _TARGET_FNS:
+        return _err(f"invalid judge: {judge!r}, must be one of {list(_ALL_TARGETS)}")
+
+    effective_candidates = list(candidates) if candidates else list(_ALL_TARGETS)
+
+    # Validate candidates
+    invalid = [c for c in effective_candidates if c not in _TARGET_FNS]
+    if invalid:
+        return _err(f"invalid candidate(s): {invalid}")
+
+    deadline = time.monotonic() + timeout
+
+    # If only 1 candidate, skip voting (before judge exclusion)
+    if len(effective_candidates) == 1:
+        target = effective_candidates[0]
+        fn = _TARGET_FNS[target]
+        try:
+            raw = await fn(prompt=prompt, cd=cd, system_prompt=system_prompt,
+                          timeout=deadline - time.monotonic(), model=model)
+            result = json.loads(raw)
+            return json.dumps({
+                "success": result.get("success", False),
+                "final_content": result.get("content", ""),
+                "candidates": {target: result.get("content", "")},
+                "judge_reasoning": "Single candidate — no voting needed.",
+            })
+        except Exception as exc:
+            return _err(str(exc))
+
+    # Remove judge from candidates to avoid conflict
+    effective_candidates = [c for c in effective_candidates if c != judge]
+    if not effective_candidates:
+        return _err("no candidates remaining after excluding judge")
+
+    # Phase 1: Run candidates in parallel
+    candidate_kwargs: dict[str, object] = {
+        "prompt": prompt,
+        "cd": cd,
+        "system_prompt": system_prompt,
+        "timeout": (deadline - time.monotonic()) * 0.7,  # 70% budget for candidates
+        "model": model,
+    }
+
+    async def _run_candidate(target: str) -> tuple[str, dict]:
+        fn = _TARGET_FNS[target]
+        try:
+            raw = await fn(**candidate_kwargs)  # type: ignore[arg-type]
+            return target, json.loads(raw)
+        except Exception as exc:
+            return target, {"success": False, "content": str(exc)}
+
+    tasks = [_run_candidate(t) for t in effective_candidates]
+    pairs = await asyncio.gather(*tasks)
+    candidate_results: dict[str, str] = {}
+    for target, data in pairs:
+        candidate_results[target] = data.get("content", "")
+
+    # Phase 2: Judge
+    labels = list("ABCDEFGHIJ")
+    candidates_text_parts: list[str] = []
+    label_map: dict[str, str] = {}  # label -> target name
+    for i, (target, content) in enumerate(candidate_results.items()):
+        label = labels[i] if i < len(labels) else str(i)
+        label_map[label] = target
+        candidates_text_parts.append(f"### Candidate {label}\n{content}")
+
+    judge_prompt = _JUDGE_TEMPLATE.format(
+        prompt=prompt,
+        candidates_text="\n\n".join(candidates_text_parts),
+    )
+
+    judge_fn = _TARGET_FNS[judge]
+    remaining = deadline - time.monotonic()
+    try:
+        judge_raw = await judge_fn(
+            prompt=judge_prompt, cd=cd, timeout=max(30.0, remaining), model=model,
+        )
+        judge_result = json.loads(judge_raw)
+        judge_reasoning = judge_result.get("content", "")
+    except Exception as exc:
+        judge_reasoning = f"Judge failed: {exc}"
+
+    return json.dumps({
+        "success": True,
+        "candidates": candidate_results,
+        "judge_reasoning": judge_reasoning,
+        "final_content": judge_reasoning,
+    })
+
+
 @mcp.tool(name="list-models", annotations=ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=True,
 ))
