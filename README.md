@@ -13,7 +13,7 @@ Wraps **Gemini CLI**, **Codex CLI**, and **Claude CLI** as MCP tools, enabling C
 
 ## ✨ Features
 
-- 🔧 **10 tools**: `codex` + `gemini` + `claude` + `broadcast` + `chain` + `vote` + `debate` + `list-models` + `status` + `usage`
+- 🔧 **11 tools**: `codex` + `gemini` + `claude` + `broadcast` + `chain` + `vote` + `debate` + `list-models` + `status` + `usage` + `quota`
 - 📋 **5 modes**: prompt forwarding / git diff review (uncommitted/base/commit) / file list review
 - 🔄 **Session resume**: continue context via `session_id`
 - 🎯 **Model selection**: specify model and reasoning effort
@@ -27,6 +27,7 @@ Wraps **Gemini CLI**, **Codex CLI**, and **Claude CLI** as MCP tools, enabling C
 - 📦 **Large prompt support**: >200KB auto-piped via stdin to avoid OS ARG_MAX limits
 - 🏷️ **Tool annotations**: every tool includes `ToolAnnotations` metadata
 - 🤝 **Multi-model collaboration**: `chain` pipeline / `vote` consensus / `debate` iteration
+- 📊 **Quota checking**: real-time account-level usage quotas via local OAuth credentials (Claude/Codex/Gemini)
 
 ## 📦 Prerequisites
 
@@ -83,7 +84,7 @@ Add to `~/.claude/settings.json`:
 }
 ```
 
-You can also allow specific tools only: `"mcp__super__codex"`, `"mcp__super__gemini"`, `"mcp__super__claude"`, `"mcp__super__broadcast"`, `"mcp__super__chain"`, `"mcp__super__vote"`, `"mcp__super__debate"`, `"mcp__super__list-models"`, `"mcp__super__status"`, `"mcp__super__usage"`.
+You can also allow specific tools only: `"mcp__super__codex"`, `"mcp__super__gemini"`, `"mcp__super__claude"`, `"mcp__super__broadcast"`, `"mcp__super__chain"`, `"mcp__super__vote"`, `"mcp__super__debate"`, `"mcp__super__list-models"`, `"mcp__super__status"`, `"mcp__super__usage"`, `"mcp__super__quota"`.
 
 </details>
 
@@ -276,7 +277,19 @@ The returned `model_id` can be used directly as the `model` parameter for other 
 
 ### `status`
 
-Check availability, version, and authentication status of all CLI tools. No parameters.
+Check availability, version, and authentication status of all CLI tools.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `include_quota` | bool | `False` | Also fetch account-level usage quotas for each provider |
+
+### `quota`
+
+Check real account-level usage quotas and rate limits. Reads local OAuth credentials (Keychain, auth.json, oauth_creds.json) — no API keys or browser cookies needed.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `provider` | str | `""` | Provider to check: `claude`, `codex`, `gemini`, or empty for all |
 
 ### `usage`
 

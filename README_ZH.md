@@ -13,7 +13,7 @@
 
 ## ✨ 特性
 
-- 🔧 **十工具**: `codex` + `gemini` + `claude` + `broadcast` + `chain` + `vote` + `debate` + `list-models` + `status` + `usage`
+- 🔧 **十一工具**: `codex` + `gemini` + `claude` + `broadcast` + `chain` + `vote` + `debate` + `list-models` + `status` + `usage` + `quota`
 - 📋 **五种模式**: prompt 转发 / git diff review (uncommitted/base/commit) / 文件列表 review
 - 🔄 **会话续接**: 通过 `session_id` 延续上下文
 - 🎯 **模型选择**: 支持指定模型和推理深度
@@ -27,6 +27,7 @@
 - 📦 **大 prompt 支持**: >200KB 自动通过 stdin 传递，避免 OS ARG_MAX 限制
 - 🏷️ **工具注解**: 每个工具附带 `ToolAnnotations` 元数据
 - 🤝 **多模型协作**: `chain` 流水线 / `vote` 投票共识 / `debate` 辩论迭代
+- 📊 **配额查询**: 通过本地 OAuth 凭据实时查询账户级用量配额 (Claude/Codex/Gemini)
 
 ## 📦 前置依赖
 
@@ -83,7 +84,7 @@ claude mcp add super -s user --transport stdio -- uv run --directory /path/to/Su
 }
 ```
 
-也可以只允许特定工具：`"mcp__super__codex"`、`"mcp__super__gemini"`、`"mcp__super__claude"`、`"mcp__super__broadcast"`、`"mcp__super__chain"`、`"mcp__super__vote"`、`"mcp__super__debate"`、`"mcp__super__list-models"`、`"mcp__super__status"`、`"mcp__super__usage"`。
+也可以只允许特定工具：`"mcp__super__codex"`、`"mcp__super__gemini"`、`"mcp__super__claude"`、`"mcp__super__broadcast"`、`"mcp__super__chain"`、`"mcp__super__vote"`、`"mcp__super__debate"`、`"mcp__super__list-models"`、`"mcp__super__status"`、`"mcp__super__usage"`、`"mcp__super__quota"`。
 
 </details>
 
@@ -276,7 +277,19 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 
 ### `status`
 
-检查所有 CLI 的可用性、版本和认证状态。无参数。
+检查所有 CLI 的可用性、版本和认证状态。
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `include_quota` | bool | `False` | 同时获取各提供商的账户级用量配额 |
+
+### `quota`
+
+查询真实账户级用量配额和速率限制。读取本地 OAuth 凭据 (Keychain、auth.json、oauth_creds.json)，无需 API key 或浏览器 cookie。
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `provider` | str | `""` | 要查询的提供商: `claude`、`codex`、`gemini`，空=全部 |
 
 ### `usage`
 
