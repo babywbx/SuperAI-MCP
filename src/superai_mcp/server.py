@@ -12,6 +12,7 @@ from mcp.types import ToolAnnotations
 
 from superai_mcp.git_utils import get_git_diff, read_files
 from superai_mcp.openrouter import check_model, fetch_models
+from superai_mcp.quota import fetch_quota, fetch_all_quotas, quota_result_to_dict
 from superai_mcp.models import CLIResult, Sandbox
 from superai_mcp.parsers import (
     is_rate_limited,
@@ -1483,22 +1484,52 @@ async def _check_cli(name: str) -> dict[str, object]:
     return {"available": True, "version": version, "authenticated": authenticated}
 
 
+@mcp.tool(name="quota", annotations=ToolAnnotations(
+    readOnlyHint=True, destructiveHint=False, idempotentHint=True,
+))
+async def quota_tool(provider: str = "") -> str:
+    """Check real account-level usage quotas and rate limits for AI providers.
+
+    Returns session/weekly usage percentages and reset times.
+    Reads local OAuth credentials (Keychain, auth.json, oauth_creds.json).
+
+    Args:
+        provider: "claude", "codex", "gemini", or "" for all providers.
+    """
+    if provider:
+        result = await fetch_quota(provider)
+        return json.dumps(quota_result_to_dict(result))
+    results = await fetch_all_quotas()
+    return json.dumps({k: quota_result_to_dict(v) for k, v in results.items()})
+
+
 @mcp.tool(name="status", annotations=ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=True,
 ))
-async def status_tool() -> str:
-    """Check availability, version, and authentication status of all CLI tools."""
+async def status_tool(include_quota: bool = False) -> str:
+    """Check availability, version, and authentication status of all CLI tools.
+
+    Args:
+        include_quota: If True, also fetch account-level usage quotas for each provider.
+    """
     results = await asyncio.gather(
         _check_cli("codex"),
         _check_cli("gemini"),
         _check_cli("claude"),
     )
-    return json.dumps({
+    out: dict[str, object] = {
         "success": True,
         "codex": results[0],
         "gemini": results[1],
         "claude": results[2],
-    })
+    }
+    if include_quota:
+        quotas = await fetch_all_quotas()
+        for cli in ("codex", "gemini", "claude"):
+            cli_dict = out[cli]
+            if isinstance(cli_dict, dict):
+                cli_dict["quota"] = quota_result_to_dict(quotas[cli])
+    return json.dumps(out)
 
 
 def serve() -> None:

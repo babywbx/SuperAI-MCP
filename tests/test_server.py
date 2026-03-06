@@ -491,3 +491,104 @@ class TestNestingDepth:
 
     def test_max_depth_default(self) -> None:
         assert _MAX_DEPTH == 5
+
+
+class TestQuotaTool:
+    async def test_single_provider(self) -> None:
+        from superai_mcp.server import quota_tool
+        from superai_mcp.quota._models import QuotaResult, SessionQuota
+
+        qr = QuotaResult(
+            provider="claude",
+            success=True,
+            plan_type="max",
+            sessions={
+                "current": SessionQuota(
+                    used_percent=25.0, remaining_percent=75.0
+                )
+            },
+        )
+        with patch(
+            "superai_mcp.server.fetch_quota",
+            new_callable=AsyncMock,
+            return_value=qr,
+        ):
+            raw = await quota_tool(provider="claude")
+        result = json.loads(raw)
+        assert result["success"] is True
+        assert result["sessions"]["current"]["used_percent"] == 25.0
+
+    async def test_all_providers(self) -> None:
+        from superai_mcp.server import quota_tool
+        from superai_mcp.quota._models import QuotaResult
+
+        qrs = {
+            "claude": QuotaResult(provider="claude", success=True),
+            "codex": QuotaResult(provider="codex", success=True),
+            "gemini": QuotaResult(
+                provider="gemini", success=False, error="no creds"
+            ),
+        }
+        with patch(
+            "superai_mcp.server.fetch_all_quotas",
+            new_callable=AsyncMock,
+            return_value=qrs,
+        ):
+            raw = await quota_tool(provider="")
+        result = json.loads(raw)
+        assert result["claude"]["success"] is True
+        assert result["gemini"]["success"] is False
+
+
+class TestStatusToolWithQuota:
+    async def test_without_quota(self) -> None:
+        with patch(
+            "superai_mcp.server._check_cli",
+            new_callable=AsyncMock,
+            return_value={
+                "available": True,
+                "version": "1.0",
+                "authenticated": True,
+            },
+        ):
+            raw = await status_tool(include_quota=False)
+        result = json.loads(raw)
+        assert "quota" not in result.get("codex", {})
+
+    async def test_with_quota(self) -> None:
+        from superai_mcp.quota._models import QuotaResult, SessionQuota
+
+        qrs = {
+            "claude": QuotaResult(
+                provider="claude",
+                success=True,
+                sessions={
+                    "current": SessionQuota(
+                        used_percent=10.0, remaining_percent=90.0
+                    )
+                },
+            ),
+            "codex": QuotaResult(provider="codex", success=True),
+            "gemini": QuotaResult(provider="gemini", success=True),
+        }
+        with patch(
+            "superai_mcp.server._check_cli",
+            new_callable=AsyncMock,
+            return_value={
+                "available": True,
+                "version": "1.0",
+                "authenticated": True,
+            },
+        ):
+            with patch(
+                "superai_mcp.server.fetch_all_quotas",
+                new_callable=AsyncMock,
+                return_value=qrs,
+            ):
+                raw = await status_tool(include_quota=True)
+        result = json.loads(raw)
+        assert result["claude"]["quota"]["success"] is True
+        assert (
+            result["claude"]["quota"]["sessions"]["current"]["used_percent"]
+            == 10.0
+        )
