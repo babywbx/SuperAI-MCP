@@ -234,7 +234,7 @@ def _summarize_line(line: str) -> str:
         return f"init: {model_name}"[:_MAX_SNIPPET] if model_name else "init"
 
     if event_type == "result":
-        status = obj.get("status", "")
+        status = obj.get("status", "") or obj.get("subtype", "")
         return f"result: {status}"[:_MAX_SNIPPET] if status else "result"
 
     # Gemini tool events — show concise summary, not raw JSON
