@@ -270,6 +270,46 @@ def _make_progress_cb(
     return _cb
 
 
+# Prompt templates — structured wrappers invokable by name
+_TEMPLATES: dict[str, str] = {
+    "review": (
+        "Review the following code. Focus on bugs, security issues, "
+        "performance problems, and code quality. Be specific and actionable.\n\n{prompt}"
+    ),
+    "refactor": (
+        "Refactor the following code for better readability, maintainability, "
+        "and adherence to best practices. Explain your changes.\n\n{prompt}"
+    ),
+    "explain": (
+        "Explain the following code in detail. Cover what it does, how it works, "
+        "and any notable design decisions.\n\n{prompt}"
+    ),
+    "test": (
+        "Generate comprehensive unit tests for the following code. "
+        "Cover edge cases, error handling, and typical usage.\n\n{prompt}"
+    ),
+    "debug": (
+        "Debug the following issue. Analyze the root cause, explain why it happens, "
+        "and provide a fix with explanation.\n\n{prompt}"
+    ),
+    "optimize": (
+        "Optimize the following code for performance. Identify bottlenecks "
+        "and suggest improvements with benchmarks or complexity analysis.\n\n{prompt}"
+    ),
+}
+
+
+def _apply_template(prompt: str, template: str) -> str:
+    """Wrap prompt with a named template. Returns prompt unchanged if template is empty."""
+    if not template:
+        return prompt
+    tpl = _TEMPLATES.get(template)
+    if tpl is None:
+        names = ", ".join(sorted(_TEMPLATES))
+        raise ValueError(f"unknown template {template!r} — available: {names}")
+    return tpl.format(prompt=prompt)
+
+
 async def _build_context(
     prompt: str,
     *,
@@ -331,6 +371,7 @@ async def codex_tool(
     return_all_messages: bool = False,
     auto_split: bool = False,
     system_prompt: str = "",
+    template: str = "",
     timeout: float = 300.0,
 ) -> str:
     """Run Codex CLI for coding tasks, code review, or general prompts.
@@ -340,6 +381,7 @@ async def codex_tool(
       - Review: set review_uncommitted=True or review_base="main"
       - Files: pass files=["a.py"] to include file contents
       - Resume: pass session_id from a previous call
+      - Template: pass template="review" to wrap prompt with structured instructions
     """
     try:
         depth = _get_depth()
@@ -358,6 +400,7 @@ async def codex_tool(
         validate_commit_sha(review_commit)
         validate_files(files)
         validate_timeout(timeout)
+        prompt = _apply_template(prompt, template)
 
         env = _child_env()
 
@@ -566,6 +609,7 @@ async def gemini_tool(
     return_all_messages: bool = False,
     auto_split: bool = False,
     system_prompt: str = "",
+    template: str = "",
     timeout: float = 300.0,
 ) -> str:
     """Run Gemini CLI for coding tasks, code review, or general prompts.
@@ -575,6 +619,7 @@ async def gemini_tool(
       - Review: set review_uncommitted=True or review_base="main"
       - Files: pass files=["a.py"] to include file contents
       - Resume: pass session_id from a previous call
+      - Template: pass template="review" to wrap prompt with structured instructions
     """
     try:
         depth = _get_depth()
@@ -591,6 +636,7 @@ async def gemini_tool(
         validate_commit_sha(review_commit)
         validate_files(files)
         validate_timeout(timeout)
+        prompt = _apply_template(prompt, template)
 
         env = _child_env()
 
@@ -742,6 +788,7 @@ async def claude_tool(
     return_all_messages: bool = False,
     auto_split: bool = False,
     system_prompt: str = "",
+    template: str = "",
     timeout: float = 300.0,
 ) -> str:
     """Run Claude CLI for coding tasks, code review, or general prompts.
@@ -751,6 +798,7 @@ async def claude_tool(
       - Review: set review_uncommitted=True or review_base="main"
       - Files: pass files=["a.py"] to include file contents
       - Resume: pass session_id from a previous call
+      - Template: pass template="review" to wrap prompt with structured instructions
     """
     try:
         depth = _get_depth()
@@ -770,6 +818,7 @@ async def claude_tool(
         validate_commit_sha(review_commit)
         validate_files(files)
         validate_timeout(timeout)
+        prompt = _apply_template(prompt, template)
 
         # Advisory only — don't block, append hint if CLI fails later
         model_warning = await check_model(model, "claude")
@@ -966,6 +1015,7 @@ async def broadcast_tool(
     files: list[str] | None = None,
     return_all_messages: bool = False,
     system_prompt: str = "",
+    template: str = "",
     timeout: float = 300.0,
 ) -> str:
     """Broadcast the same prompt to multiple CLI tools in parallel.
@@ -977,7 +1027,7 @@ async def broadcast_tool(
     Example: ``overrides={"codex": {"timeout": 600}, "claude": {"effort": "high"}}``
     Priority: overrides > models > global defaults.
     Pre-built context params (review_uncommitted, review_base, review_commit,
-    files) cannot be overridden per-target.
+    files, template) cannot be overridden per-target.
     """
     effective_targets = list(_ALL_TARGETS) if not targets else targets
 
@@ -997,11 +1047,13 @@ async def broadcast_tool(
 
     # Pre-build context once to avoid repeated git diff / file reads.
     # system_prompt is NOT baked in here — it's passed per-target so overrides work.
+    # template is applied here so all targets get the same expanded prompt.
     try:
         validate_cd(cd)
         validate_commit_sha(review_commit)
         validate_files(files)
         validate_timeout(timeout)
+        prompt = _apply_template(prompt, template)
         effective_prompt = await _build_context(
             prompt, cd=cd,
             review_uncommitted=review_uncommitted,
@@ -1028,7 +1080,7 @@ async def broadcast_tool(
     # Params that are pre-built into context and must not be overridden per-target
     _BLOCKED_OVERRIDE_KEYS = frozenset({
         "prompt", "cd", "ctx",
-        "review_uncommitted", "review_base", "review_commit", "files",
+        "review_uncommitted", "review_base", "review_commit", "files", "template",
     })
 
     # Forward pre-built prompt; disable review/files so tools don't redo the work
