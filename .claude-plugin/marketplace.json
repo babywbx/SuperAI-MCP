@@ -1,0 +1,23 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "superai-mcp",
+  "description": "Multi-model AI collaboration tools for Claude Code",
+  "owner": {
+    "name": "Babywbx",
+    "url": "https://github.com/babywbx"
+  },
+  "plugins": [
+    {
+      "name": "superai-mcp",
+      "description": "Wraps Codex, Gemini, and Claude CLIs as MCP tools with broadcast, chain, vote, debate, and quota checking",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/using-superai-mcp",
+        "./skills/multi-model-review",
+        "./skills/quota-check"
+      ],
+      "category": "development"
+    }
+  ]
+}
