@@ -212,7 +212,7 @@ async def fetch_gemini_quota() -> QuotaResult:
         return QuotaResult(provider="gemini", error=str(e))
 
     groups: dict[str, list[dict]] = {}
-    for bucket in data.get("quotaBuckets", []):
+    for bucket in data.get("buckets", data.get("quotaBuckets", [])):
         model_id = bucket.get("modelId", "")
         cls = _classify_model(model_id)
         if cls:

@@ -31,7 +31,7 @@ _LOAD_CODE_ASSIST_RESP = {
 }
 
 _QUOTA_RESPONSE = {
-    "quotaBuckets": [
+    "buckets": [
         {
             "modelId": "gemini-2.5-pro",
             "remainingFraction": 0.75,
