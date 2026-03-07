@@ -11,6 +11,8 @@ _PROGRESS_INTERVAL = 5.0
 _GRACE_OUTPUT = 30.0
 # Grace period when output contains keywords signaling active generation
 _GRACE_KEYWORD = 120.0
+# Maximum cumulative grace time to prevent unbounded runs
+_MAX_GRACE_TOTAL = 300.0
 # Keywords that signal CLI is in its final output phase (strict).
 # Only matched against the LAST stdout line (lowercased).
 # Codex:  "agent_message" appears in item.completed when outputting the final answer.
@@ -105,6 +107,7 @@ async def run_cli(
         remaining = timeout
         last_line_count = 0
         in_grace = False
+        grace_used = 0.0
 
         while True:
             interval = min(_PROGRESS_INTERVAL, remaining)
@@ -115,18 +118,25 @@ async def run_cli(
             remaining -= interval
             if remaining <= 0:
                 # Grace period: extend if CLI is still producing output
+                if grace_used >= _MAX_GRACE_TOTAL:
+                    raise asyncio.TimeoutError()
                 current_count = len(stdout_lines)
                 has_new_output = current_count > last_line_count
                 has_keywords = False
                 if stdout_lines:
                     recent = stdout_lines[-1].lower()
                     has_keywords = any(kw in recent for kw in _GRACE_KEYWORDS)
+                grace_budget = _MAX_GRACE_TOTAL - grace_used
                 if has_keywords:
-                    remaining = _GRACE_KEYWORD
+                    extension = min(_GRACE_KEYWORD, grace_budget)
+                    remaining = extension
+                    grace_used += extension
                     last_line_count = current_count
                     in_grace = True
                 elif has_new_output:
-                    remaining = _GRACE_OUTPUT
+                    extension = min(_GRACE_OUTPUT, grace_budget)
+                    remaining = extension
+                    grace_used += extension
                     last_line_count = current_count
                     in_grace = True
                 else:
