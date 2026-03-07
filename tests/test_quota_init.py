@@ -12,7 +12,7 @@ _FAIL = QuotaResult(provider="codex", success=False, error="boom")
 
 class TestFetchQuota:
     async def test_claude(self) -> None:
-        with patch("superai_mcp.quota.fetch_claude_quota", new_callable=AsyncMock, return_value=_OK):
+        with patch.dict("superai_mcp.quota._PROVIDERS", {"claude": AsyncMock(return_value=_OK)}):
             result = await fetch_quota("claude")
         assert result.success is True
 
