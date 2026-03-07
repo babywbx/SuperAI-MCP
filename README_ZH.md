@@ -17,7 +17,7 @@
 - 📋 **五种模式**: prompt 转发 / git diff review (uncommitted/base/commit) / 文件列表 review
 - 🔄 **会话续接**: 通过 `session_id` 延续上下文
 - 🎯 **模型选择**: 支持指定模型和推理深度
-- ⚡ **纯异步**: 基于 `asyncio.create_subprocess_exec`，无线程
+- ⚡ **纯异步**: 基于 `asyncio.create_subprocess_exec`（配额/网络使用 `asyncio.to_thread`）
 - 🔍 **模型发现**: `list-models` 实时查询可用模型，`model` 参数自动校验+纠错建议
 - 🔒 **安全**: 路径遍历防护、git ref 校验、无 shell 注入、嵌套深度限制 (最大 5 层)
 - 📡 **进度通知**: 长时间任务每 5s 发送 `report_progress` keepalive

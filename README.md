@@ -17,7 +17,7 @@ Wraps **Gemini CLI**, **Codex CLI**, and **Claude CLI** as MCP tools, enabling C
 - 📋 **5 modes**: prompt forwarding / git diff review (uncommitted/base/commit) / file list review
 - 🔄 **Session resume**: continue context via `session_id`
 - 🎯 **Model selection**: specify model and reasoning effort
-- ⚡ **Pure async**: built on `asyncio.create_subprocess_exec`, no threads
+- ⚡ **Pure async**: built on `asyncio.create_subprocess_exec` (quota/network helpers use `asyncio.to_thread`)
 - 🔍 **Model discovery**: `list-models` queries available models in real-time, `model` param auto-validates with correction suggestions
 - 🔒 **Secure**: path traversal guard, git ref validation, no shell injection, nesting depth limit (max 5)
 - 📡 **Progress notifications**: `report_progress` keepalive every 5s during long tasks
