@@ -1128,7 +1128,7 @@ async def chain_tool(
             "prompt": prompt,
             "cd": cd,
             "ctx": ctx,
-            "system_prompt": system_prompt if i == 0 else "",
+            "system_prompt": system_prompt,
             "timeout": remaining,
         }
         if step_model:
@@ -1280,6 +1280,7 @@ async def vote_tool(
     try:
         judge_raw = await judge_fn(
             prompt=judge_prompt, cd=cd, ctx=ctx, timeout=remaining, model=model,
+            system_prompt=system_prompt,
         )
         judge_result = json.loads(judge_raw)
         judge_reasoning = judge_result.get("content", "")
@@ -1356,7 +1357,7 @@ async def debate_tool(
         try:
             raw = await fn(
                 prompt=round_prompt, cd=cd, ctx=ctx,
-                system_prompt=system_prompt if i == 0 else "",
+                system_prompt=system_prompt,
                 timeout=remaining, model=model,
             )
             result = json.loads(raw)

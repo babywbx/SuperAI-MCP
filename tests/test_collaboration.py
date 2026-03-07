@@ -132,7 +132,7 @@ class TestChainTool:
         for c in calls:
             assert c["timeout"] <= 60.0
 
-    async def test_system_prompt_first_step_only(self) -> None:
+    async def test_system_prompt_all_steps(self) -> None:
         calls: list[dict] = []
 
         async def fake_codex(**kwargs) -> str:
@@ -148,9 +148,9 @@ class TestChainTool:
                 cd="/tmp",
                 system_prompt="be concise",
             )
-        # system_prompt passed to first step, empty for subsequent
+        # system_prompt propagated to all steps
         assert calls[0]["system_prompt"] == "be concise"
-        assert calls[1]["system_prompt"] == ""
+        assert calls[1]["system_prompt"] == "be concise"
 
 
 from superai_mcp.server import vote_tool
