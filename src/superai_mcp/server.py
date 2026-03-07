@@ -78,30 +78,90 @@ def _child_env(base: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 # Cumulative usage tracking (in-memory only, resets on process restart)
-_usage: dict[str, dict[str, int]] = {}
+_usage: dict[str, dict[str, int | float]] = {}
 
 
 def _reset_usage() -> None:
     """Reset all usage counters."""
     for cli in ("codex", "gemini", "claude"):
-        _usage[cli] = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
+        _usage[cli] = {
+            "calls": 0, "input_tokens": 0, "output_tokens": 0,
+            "estimated_cost_usd": 0.0,
+        }
 
 
 # Initialize on module load
 _reset_usage()
 
+# Pricing cache from OpenRouter (model_id → (prompt_price, completion_price) per token)
+_pricing: dict[str, tuple[float, float]] = {}
+_pricing_loaded = False
 
-def _track_usage(cli: str, usage: dict[str, object] | None) -> None:
+
+async def _ensure_pricing() -> None:
+    """Load pricing data from OpenRouter (cached, best-effort)."""
+    global _pricing_loaded
+    if _pricing_loaded:
+        return
+    _pricing_loaded = True
+    try:
+        for provider in ("openai", "google", "anthropic"):
+            models = await fetch_models(provider)
+            for m in models:
+                mid = m.get("model_id", "")
+                pp = m.get("prompt_price")
+                cp = m.get("completion_price")
+                if mid and pp is not None and cp is not None:
+                    try:
+                        _pricing[mid.lower()] = (float(pp), float(cp))
+                    except (ValueError, TypeError):
+                        pass
+    except Exception:
+        pass  # best-effort
+
+
+def _estimate_cost(
+    model: str | None, input_tokens: int, output_tokens: int,
+) -> float:
+    """Estimate cost in USD from cached pricing. Returns 0.0 if unknown."""
+    if not model or not _pricing:
+        return 0.0
+    key = model.lower()
+    # Try exact match, then prefix match (e.g. "sonnet" → "claude-sonnet-4")
+    prices = _pricing.get(key)
+    if not prices:
+        for mid, p in _pricing.items():
+            if key in mid:
+                prices = p
+                break
+    if not prices:
+        return 0.0
+    return input_tokens * prices[0] + output_tokens * prices[1]
+
+
+def _track_usage(
+    cli: str, usage: dict[str, object] | None, model: str | None = None,
+) -> None:
     """Accumulate usage stats for a CLI tool."""
     if cli not in _usage:
         return
     _usage[cli]["calls"] += 1
     if usage is None:
         return
+    inp = 0
+    out = 0
     for key in ("input_tokens", "output_tokens"):
         val = usage.get(key)
         if isinstance(val, (int, float)):
             _usage[cli][key] += int(val)
+            if key == "input_tokens":
+                inp = int(val)
+            else:
+                out = int(val)
+    cost = _estimate_cost(model, inp, out)
+    _usage[cli]["estimated_cost_usd"] = round(
+        float(_usage[cli]["estimated_cost_usd"]) + cost, 6,
+    )
 
 
 def _gemini_prompt_args(prompt: str) -> tuple[list[str], bytes | None]:
@@ -472,7 +532,7 @@ async def codex_tool(
                 effective_prompt, call_fn=_call, resume_fn=_resume,
                 total_timeout=timeout,
             )
-            _track_usage("codex", parsed.usage)
+            _track_usage("codex", parsed.usage, parsed.model)
             return parsed.model_dump_json(exclude_none=True)
 
         # Resume mode: pass session_id and prompt as positional args
@@ -584,7 +644,7 @@ async def codex_tool(
                 msg = f"{msg} (hint: {model_warning})"
             parsed = parsed.model_copy(update={"content": msg})
 
-        _track_usage("codex", parsed.usage)
+        _track_usage("codex", parsed.usage, parsed.model)
         return parsed.model_dump_json(exclude_none=True)
     except ValueError as e:
         return _err(str(e))
@@ -700,7 +760,7 @@ async def gemini_tool(
                 effective_prompt, call_fn=_call, resume_fn=_resume,
                 total_timeout=timeout,
             )
-            _track_usage("gemini", parsed.usage)
+            _track_usage("gemini", parsed.usage, parsed.model)
             return parsed.model_dump_json(exclude_none=True)
 
         prompt_args, stdin_data = _gemini_prompt_args(effective_prompt)
@@ -754,7 +814,7 @@ async def gemini_tool(
                 msg = f"{msg} (hint: {model_warning})"
             parsed = parsed.model_copy(update={"content": msg})
 
-        _track_usage("gemini", parsed.usage)
+        _track_usage("gemini", parsed.usage, parsed.model)
         return parsed.model_dump_json(exclude_none=True)
     except ValueError as e:
         return _err(str(e))
@@ -890,7 +950,7 @@ async def claude_tool(
                 effective_prompt, call_fn=_call, resume_fn=_resume,
                 total_timeout=timeout,
             )
-            _track_usage("claude", parsed.usage)
+            _track_usage("claude", parsed.usage, parsed.model)
             return parsed.model_dump_json(exclude_none=True)
 
         prompt_args, stdin_data = _claude_prompt_args(effective_prompt)
@@ -981,7 +1041,7 @@ async def claude_tool(
                 msg = f"{msg} (hint: {model_warning})"
             parsed = parsed.model_copy(update={"content": msg})
 
-        _track_usage("claude", parsed.usage)
+        _track_usage("claude", parsed.usage, parsed.model)
         return parsed.model_dump_json(exclude_none=True)
     except ValueError as e:
         return _err(str(e))
@@ -1493,14 +1553,23 @@ async def list_models_tool(
     readOnlyHint=False, destructiveHint=False, idempotentHint=False,
 ))
 async def usage_tool(reset: bool = False) -> str:
-    """Show cumulative token usage and call counts across all CLI tools.
+    """Show cumulative token usage, call counts, and estimated cost across all CLI tools.
 
-    Returns per-CLI and total stats. Set reset=True to clear counters after reading.
+    Returns per-CLI and total stats with estimated_cost_usd.
+    Cost is estimated from OpenRouter pricing data (best-effort).
+    Set reset=True to clear counters after reading.
     """
-    total: dict[str, int] = {"calls": 0, "input_tokens": 0, "output_tokens": 0}
+    await _ensure_pricing()
+
+    total: dict[str, int | float] = {
+        "calls": 0, "input_tokens": 0, "output_tokens": 0, "estimated_cost_usd": 0.0,
+    }
     for stats in _usage.values():
-        for key in total:
+        for key in ("calls", "input_tokens", "output_tokens"):
             total[key] += stats[key]
+        total["estimated_cost_usd"] = round(
+            float(total["estimated_cost_usd"]) + float(stats["estimated_cost_usd"]), 6,
+        )
 
     result: dict[str, object] = {"success": True}
     for cli in ("codex", "gemini", "claude"):
