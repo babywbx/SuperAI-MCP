@@ -331,6 +331,64 @@ def _make_progress_cb(
     return _cb
 
 
+def _extract_content_chunk(line: str, cli: str) -> str:
+    """Extract assistant content from a CLI output line. Returns empty if not content."""
+    try:
+        obj = json.loads(line)
+    except (json.JSONDecodeError, ValueError):
+        return ""
+    if not isinstance(obj, dict):
+        return ""
+    etype = obj.get("type", "")
+
+    if cli == "codex":
+        if etype == "item.completed":
+            item = obj.get("item")
+            if isinstance(item, dict) and item.get("type") == "agent_message":
+                text = item.get("text", "")
+                return text if isinstance(text, str) else ""
+
+    elif cli == "gemini":
+        if etype == "message" and obj.get("role") == "assistant":
+            content = obj.get("content", "")
+            return content if isinstance(content, str) else ""
+
+    elif cli == "claude":
+        if etype == "assistant":
+            msg = obj.get("message")
+            if isinstance(msg, dict):
+                blocks = msg.get("content", [])
+                if isinstance(blocks, list):
+                    texts: list[str] = []
+                    for block in blocks:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            t = block.get("text", "")
+                            if isinstance(t, str) and t:
+                                texts.append(t)
+                    return "".join(texts)
+        if etype == "result":
+            text = obj.get("result", "")
+            return text if isinstance(text, str) else ""
+
+    return ""
+
+
+def _make_stream_cb(
+    ctx: Context | None,
+    cli: str,
+) -> Callable[[str], Awaitable[None]] | None:
+    """Build an on_output callback that pushes content chunks via ctx.info()."""
+    if ctx is None:
+        return None
+
+    async def _cb(line: str) -> None:
+        chunk = _extract_content_chunk(line, cli)
+        if chunk:
+            await ctx.info(chunk)
+
+    return _cb
+
+
 # Prompt templates — structured wrappers invokable by name
 _TEMPLATES: dict[str, str] = {
     "review": (
