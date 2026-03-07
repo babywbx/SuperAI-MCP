@@ -13,27 +13,37 @@ from superai_mcp.cache import (
 
 class TestCacheKey:
     def test_deterministic(self) -> None:
-        k1 = cache_key("hello", "gpt-4")
-        k2 = cache_key("hello", "gpt-4")
+        k1 = cache_key("codex", "/tmp", "hello", "gpt-4")
+        k2 = cache_key("codex", "/tmp", "hello", "gpt-4")
         assert k1 == k2
 
     def test_different_prompt(self) -> None:
-        k1 = cache_key("hello", "gpt-4")
-        k2 = cache_key("world", "gpt-4")
+        k1 = cache_key("codex", "/tmp", "hello", "gpt-4")
+        k2 = cache_key("codex", "/tmp", "world", "gpt-4")
         assert k1 != k2
 
     def test_different_model(self) -> None:
-        k1 = cache_key("hello", "gpt-4")
-        k2 = cache_key("hello", "claude")
+        k1 = cache_key("codex", "/tmp", "hello", "gpt-4")
+        k2 = cache_key("codex", "/tmp", "hello", "claude")
+        assert k1 != k2
+
+    def test_different_cli(self) -> None:
+        k1 = cache_key("codex", "/tmp", "hello", "")
+        k2 = cache_key("claude", "/tmp", "hello", "")
+        assert k1 != k2
+
+    def test_different_cd(self) -> None:
+        k1 = cache_key("codex", "/project_a", "hello", "")
+        k2 = cache_key("codex", "/project_b", "hello", "")
         assert k1 != k2
 
     def test_empty_model(self) -> None:
-        k1 = cache_key("hello", "")
-        k2 = cache_key("hello", "")
+        k1 = cache_key("codex", "/tmp", "hello", "")
+        k2 = cache_key("codex", "/tmp", "hello", "")
         assert k1 == k2
 
     def test_returns_hex_string(self) -> None:
-        k = cache_key("test", "model")
+        k = cache_key("codex", "/tmp", "test", "model")
         assert isinstance(k, str)
         assert len(k) == 64  # sha256 hex digest
 

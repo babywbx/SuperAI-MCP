@@ -21,7 +21,7 @@ class TestCacheHit:
             prompt, cd="/tmp", review_uncommitted=False,
             review_base="", review_commit="", files=None, system_prompt="",
         )
-        cache_put(cache_key(effective, model), cached_response)
+        cache_put(cache_key("codex", "/tmp", effective, model), cached_response)
 
         with patch("superai_mcp.server.run_cli") as mock_cli:
             with patch("superai_mcp.server.shutil.which", return_value="/usr/bin/codex"):
@@ -56,7 +56,7 @@ class TestCacheHit:
             "test", cd="/tmp", review_uncommitted=False,
             review_base="", review_commit="", files=None, system_prompt="",
         )
-        assert cache_get(cache_key(effective, "m")) == result
+        assert cache_get(cache_key("codex", "/tmp", effective, "m")) == result
 
     async def test_cache_disabled_by_default(self) -> None:
         codex_output = [
@@ -74,7 +74,7 @@ class TestCacheHit:
             "test", cd="/tmp", review_uncommitted=False,
             review_base="", review_commit="", files=None, system_prompt="",
         )
-        assert cache_get(cache_key(effective, "")) is None
+        assert cache_get(cache_key("codex", "/tmp", effective, "")) is None
 
     async def test_failed_response_not_cached(self) -> None:
         mock_result = ProcessResult(returncode=1, stdout_lines=[], stderr="error")
@@ -89,11 +89,11 @@ class TestCacheHit:
             "test", cd="/tmp", review_uncommitted=False,
             review_base="", review_commit="", files=None, system_prompt="",
         )
-        assert cache_get(cache_key(effective, "")) is None
+        assert cache_get(cache_key("codex", "/tmp", effective, "")) is None
 
     async def test_session_id_bypasses_cache(self) -> None:
         cached = json.dumps({"success": True, "content": "cached"})
-        cache_put(cache_key("test", ""), cached)
+        cache_put(cache_key("codex", "/tmp", "test", ""), cached)
 
         mock_result = ProcessResult(
             returncode=0,

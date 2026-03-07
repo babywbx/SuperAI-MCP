@@ -548,7 +548,7 @@ async def codex_tool(
         )
 
         if use_cache and not session_id and not auto_split:
-            _ck = cache_key(effective_prompt, model)
+            _ck = cache_key("codex", cd, effective_prompt, model)
             cached = cache_get(_ck)
             if cached is not None:
                 return cached
@@ -715,7 +715,7 @@ async def codex_tool(
 
         response = parsed.model_dump_json(exclude_none=True)
         if use_cache and parsed.success and not session_id and "[fallback:" not in parsed.content:
-            cache_put(cache_key(effective_prompt, model), response)
+            cache_put(cache_key("codex", cd, effective_prompt, model), response)
         _track_usage("codex", parsed.usage, parsed.model)
         return response
     except ValueError as e:
@@ -790,7 +790,7 @@ async def gemini_tool(
         )
 
         if use_cache and not session_id and not auto_split:
-            _ck = cache_key(effective_prompt, model)
+            _ck = cache_key("gemini", cd, effective_prompt, model)
             cached = cache_get(_ck)
             if cached is not None:
                 return cached
@@ -897,7 +897,7 @@ async def gemini_tool(
 
         response = parsed.model_dump_json(exclude_none=True)
         if use_cache and parsed.success and not session_id and "[fallback:" not in parsed.content:
-            cache_put(cache_key(effective_prompt, model), response)
+            cache_put(cache_key("gemini", cd, effective_prompt, model), response)
         _track_usage("gemini", parsed.usage, parsed.model)
         return response
     except ValueError as e:
@@ -982,7 +982,7 @@ async def claude_tool(
         )
 
         if use_cache and not session_id and not auto_split:
-            _ck = cache_key(effective_prompt, model)
+            _ck = cache_key("claude", cd, effective_prompt, model)
             cached = cache_get(_ck)
             if cached is not None:
                 return cached
@@ -1137,7 +1137,7 @@ async def claude_tool(
 
         response = parsed.model_dump_json(exclude_none=True)
         if use_cache and parsed.success and not session_id and "[fallback:" not in parsed.content:
-            cache_put(cache_key(effective_prompt, model), response)
+            cache_put(cache_key("claude", cd, effective_prompt, model), response)
         _track_usage("claude", parsed.usage, parsed.model)
         return response
     except ValueError as e:

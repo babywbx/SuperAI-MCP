@@ -87,6 +87,9 @@ async def run_cli(
     # Shared buffer so the progress loop can peek at the latest line
     stdout_lines: list[str] = []
 
+    # Fire-and-forget tasks for on_output to avoid blocking pipe reads
+    _output_tasks: list[asyncio.Task[None]] = []
+
     async def drain_lines(stream: asyncio.StreamReader) -> list[str]:
         while True:
             raw = await stream.readline()
@@ -95,7 +98,7 @@ async def run_cli(
             line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
             stdout_lines.append(line)
             if on_output is not None:
-                await on_output(line)
+                _output_tasks.append(asyncio.create_task(on_output(line)))
         return stdout_lines
 
     async def drain_all(stream: asyncio.StreamReader) -> str:
@@ -155,16 +158,22 @@ async def run_cli(
         wait_task.cancel()
         stdout_task.cancel()
         stderr_task.cancel()
-        cleanup = [wait_task, stdout_task, stderr_task]
+        cleanup: list[asyncio.Task[object]] = [wait_task, stdout_task, stderr_task]
         if stdin_task is not None:
             stdin_task.cancel()
             cleanup.append(stdin_task)
+        for t in _output_tasks:
+            t.cancel()
+            cleanup.append(t)
         await asyncio.gather(*cleanup, return_exceptions=True)
         raise
 
     if stdin_task is not None:
         await stdin_task
     stdout_lines, stderr = await asyncio.gather(stdout_task, stderr_task)
+    # Wait for fire-and-forget output callbacks to finish (best-effort)
+    if _output_tasks:
+        await asyncio.gather(*_output_tasks, return_exceptions=True)
     return ProcessResult(
         returncode=proc.returncode if proc.returncode is not None else -1,
         stdout_lines=stdout_lines,

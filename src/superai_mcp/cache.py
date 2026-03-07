@@ -5,8 +5,16 @@ import os
 
 from cachetools import TTLCache
 
-_DEFAULT_TTL = int(os.environ.get("SUPERAI_MCP_CACHE_TTL", "300"))
-_DEFAULT_MAXSIZE = int(os.environ.get("SUPERAI_MCP_CACHE_MAXSIZE", "128"))
+def _safe_int(val: str, default: int) -> int:
+    """Parse int from string, falling back to default on error."""
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
+_DEFAULT_TTL = _safe_int(os.environ.get("SUPERAI_MCP_CACHE_TTL", "300"), 300)
+_DEFAULT_MAXSIZE = _safe_int(os.environ.get("SUPERAI_MCP_CACHE_MAXSIZE", "128"), 128)
 
 _cache: TTLCache[str, str] = TTLCache(maxsize=_DEFAULT_MAXSIZE, ttl=_DEFAULT_TTL)
 
@@ -17,9 +25,9 @@ def _replace_cache(*, maxsize: int, ttl: float) -> None:
     _cache = TTLCache(maxsize=maxsize, ttl=ttl)
 
 
-def cache_key(prompt: str, model: str) -> str:
-    """Build a deterministic cache key from prompt and model."""
-    raw = f"{prompt}|{model}"
+def cache_key(cli: str, cd: str, prompt: str, model: str) -> str:
+    """Build a deterministic cache key from CLI name, directory, prompt, and model."""
+    raw = f"{cli}|{cd}|{prompt}|{model}"
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
