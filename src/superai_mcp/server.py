@@ -21,6 +21,7 @@ from superai_mcp.parsers import (
     parse_codex_output,
     parse_gemini_output,
 )
+from superai_mcp.cache import cache_clear, cache_get, cache_key, cache_put, cache_stats
 from superai_mcp.runner import run_cli
 from superai_mcp.splitter import run_auto_split
 from superai_mcp.validate import (
@@ -432,6 +433,7 @@ async def codex_tool(
     auto_split: bool = False,
     system_prompt: str = "",
     template: str = "",
+    use_cache: bool = False,
     timeout: float = 300.0,
 ) -> str:
     """Run Codex CLI for coding tasks, code review, or general prompts.
@@ -485,6 +487,12 @@ async def codex_tool(
             files=files,
             system_prompt=system_prompt,
         )
+
+        if use_cache and not session_id and not auto_split:
+            _ck = cache_key(effective_prompt, model)
+            cached = cache_get(_ck)
+            if cached is not None:
+                return cached
 
         if auto_split:
             async def _call(p: str, timeout: float) -> CLIResult:
@@ -644,8 +652,11 @@ async def codex_tool(
                 msg = f"{msg} (hint: {model_warning})"
             parsed = parsed.model_copy(update={"content": msg})
 
+        response = parsed.model_dump_json(exclude_none=True)
+        if use_cache and parsed.success and not session_id and "[fallback:" not in parsed.content:
+            cache_put(cache_key(effective_prompt, model), response)
         _track_usage("codex", parsed.usage, parsed.model)
-        return parsed.model_dump_json(exclude_none=True)
+        return response
     except ValueError as e:
         return _err(str(e))
     except Exception:
@@ -670,6 +681,7 @@ async def gemini_tool(
     auto_split: bool = False,
     system_prompt: str = "",
     template: str = "",
+    use_cache: bool = False,
     timeout: float = 300.0,
 ) -> str:
     """Run Gemini CLI for coding tasks, code review, or general prompts.
@@ -714,6 +726,12 @@ async def gemini_tool(
             files=files,
             system_prompt=system_prompt,
         )
+
+        if use_cache and not session_id and not auto_split:
+            _ck = cache_key(effective_prompt, model)
+            cached = cache_get(_ck)
+            if cached is not None:
+                return cached
 
         if not sandbox and not os.environ.get("SUPERAI_ALLOW_DANGEROUS"):
             return _err(
@@ -814,8 +832,11 @@ async def gemini_tool(
                 msg = f"{msg} (hint: {model_warning})"
             parsed = parsed.model_copy(update={"content": msg})
 
+        response = parsed.model_dump_json(exclude_none=True)
+        if use_cache and parsed.success and not session_id and "[fallback:" not in parsed.content:
+            cache_put(cache_key(effective_prompt, model), response)
         _track_usage("gemini", parsed.usage, parsed.model)
-        return parsed.model_dump_json(exclude_none=True)
+        return response
     except ValueError as e:
         return _err(str(e))
     except Exception:
@@ -849,6 +870,7 @@ async def claude_tool(
     auto_split: bool = False,
     system_prompt: str = "",
     template: str = "",
+    use_cache: bool = False,
     timeout: float = 300.0,
 ) -> str:
     """Run Claude CLI for coding tasks, code review, or general prompts.
@@ -894,6 +916,12 @@ async def claude_tool(
             files=files,
             system_prompt=system_prompt,
         )
+
+        if use_cache and not session_id and not auto_split:
+            _ck = cache_key(effective_prompt, model)
+            cached = cache_get(_ck)
+            if cached is not None:
+                return cached
 
         # Sandbox mapping (needed for both auto_split and normal paths)
         sandbox_args: list[str] = []
@@ -1041,8 +1069,11 @@ async def claude_tool(
                 msg = f"{msg} (hint: {model_warning})"
             parsed = parsed.model_copy(update={"content": msg})
 
+        response = parsed.model_dump_json(exclude_none=True)
+        if use_cache and parsed.success and not session_id and "[fallback:" not in parsed.content:
+            cache_put(cache_key(effective_prompt, model), response)
         _track_usage("claude", parsed.usage, parsed.model)
-        return parsed.model_dump_json(exclude_none=True)
+        return response
     except ValueError as e:
         return _err(str(e))
     except Exception:
@@ -1076,6 +1107,7 @@ async def broadcast_tool(
     return_all_messages: bool = False,
     system_prompt: str = "",
     template: str = "",
+    use_cache: bool = False,
     timeout: float = 300.0,
 ) -> str:
     """Broadcast the same prompt to multiple CLI tools in parallel.
@@ -1154,6 +1186,7 @@ async def broadcast_tool(
         "files": None,
         "return_all_messages": return_all_messages,
         "system_prompt": system_prompt,
+        "use_cache": use_cache,
         "timeout": timeout,
     }
 
@@ -1552,12 +1585,13 @@ async def list_models_tool(
 @mcp.tool(name="usage", annotations=ToolAnnotations(
     readOnlyHint=False, destructiveHint=False, idempotentHint=False,
 ))
-async def usage_tool(reset: bool = False) -> str:
+async def usage_tool(reset: bool = False, clear_cache: bool = False) -> str:
     """Show cumulative token usage, call counts, and estimated cost across all CLI tools.
 
     Returns per-CLI and total stats with estimated_cost_usd.
     Cost is estimated from OpenRouter pricing data (best-effort).
     Set reset=True to clear counters after reading.
+    Set clear_cache=True to purge the response cache.
     """
     await _ensure_pricing()
 
@@ -1575,6 +1609,10 @@ async def usage_tool(reset: bool = False) -> str:
     for cli in ("codex", "gemini", "claude"):
         result[cli] = dict(_usage[cli])
     result["total"] = total
+    result["cache"] = cache_stats()
+
+    if clear_cache:
+        cache_clear()
 
     if reset:
         _reset_usage()
