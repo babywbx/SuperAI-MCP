@@ -30,6 +30,8 @@
 - 🏷️ **工具注解**: 每个工具附带 `ToolAnnotations` 元数据
 - 🤝 **多模型协作**: `chain` 流水线 / `vote` 投票共识 / `debate` 辩论迭代
 - 📊 **配额查询**: 通过本地 OAuth 凭据实时查询账户级用量配额 (Claude/Codex/Gemini)
+- 🗄️ **响应缓存**: 可选的内存 LRU+TTL 缓存 (`use_cache`)，相同 prompt 避免重复调用
+- 📡 **流式输出**: 可选的实时推送 AI 响应片段，通过 MCP 通知 (`stream`)
 
 ## 📦 前置依赖
 
@@ -166,6 +168,8 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
 | `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
 | `template` | str | `""` | 提示模板: `review`、`refactor`、`explain`、`test`、`debug`、`optimize` |
+| `use_cache` | bool | `False` | 相同 prompt+model 返回缓存结果 (LRU+TTL) |
+| `stream` | bool | `False` | 通过 `ctx.info()` 实时推送响应片段 |
 | `timeout` | float | `300` | 超时秒数 |
 
 ### `gemini`
@@ -185,6 +189,8 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
 | `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
 | `template` | str | `""` | 提示模板: `review`、`refactor`、`explain`、`test`、`debug`、`optimize` |
+| `use_cache` | bool | `False` | 相同 prompt+model 返回缓存结果 (LRU+TTL) |
+| `stream` | bool | `False` | 通过 `ctx.info()` 实时推送响应片段 |
 | `timeout` | float | `300` | 超时秒数 |
 
 ### `claude`
@@ -206,6 +212,8 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
 | `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
 | `template` | str | `""` | 提示模板: `review`、`refactor`、`explain`、`test`、`debug`、`optimize` |
+| `use_cache` | bool | `False` | 相同 prompt+model 返回缓存结果 (LRU+TTL) |
+| `stream` | bool | `False` | 通过 `ctx.info()` 实时推送响应片段 |
 | `timeout` | float | `300` | 超时秒数 |
 
 ### `broadcast`
@@ -227,6 +235,8 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `return_all_messages` | bool | `False` | 返回完整事件流 |
 | `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
 | `template` | str | `""` | 提示模板: `review`、`refactor`、`explain`、`test`、`debug`、`optimize` |
+| `use_cache` | bool | `False` | 相同 prompt+model 返回缓存结果 (LRU+TTL) |
+| `stream` | bool | `False` | 通过 `ctx.info()` 实时推送响应片段 |
 | `timeout` | float | `300` | 超时秒数 |
 
 **按目标覆盖参数**：使用 `overrides` 为每个 CLI 单独设置任意参数。顶层参数作为默认值，`overrides` 中的值优先。模型优先级：`overrides` > `models` > `model`。
@@ -324,6 +334,24 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | 参数 | 类型 | 默认 | 说明 |
 |------|------|------|------|
 | `reset` | bool | `False` | 读取后清零计数器 |
+| `clear_cache` | bool | `False` | 清除响应缓存 |
+
+## 🗄️ 响应缓存
+
+可选的内存响应缓存 (LRU+TTL)。开启 `use_cache=True` 后，相同请求（相同 prompt+model）直接返回缓存结果，避免重复 CLI 调用。
+
+- **启用**：在 `codex`/`gemini`/`claude`/`broadcast` 上传入 `use_cache=True`
+- **缓存统计与清除**：通过 `usage` 工具查看命中/未命中次数；传入 `clear_cache=True` 清除缓存
+- **环境变量**：`SUPERAI_MCP_CACHE_TTL`（默认 300s）、`SUPERAI_MCP_CACHE_MAXSIZE`（默认 128）
+- **不缓存**：失败响应、回退结果、auto_split 结果、会话续接
+
+## 📡 流式输出
+
+可选的实时推送 AI 响应片段，通过 MCP `ctx.info()` 通知。开启 `stream=True` 后，内容片段在 CLI 输出时即刻推送，长任务可实时查看进度。
+
+- **启用**：在 `codex`/`gemini`/`claude`/`broadcast` 上传入 `stream=True`
+- 片段通过 `on_output` 回调从 CLI stdout 实时提取
+- 最终完整响应仍作为工具结果返回
 
 ## 🔍 模型校验
 

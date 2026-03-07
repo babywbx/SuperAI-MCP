@@ -15,6 +15,8 @@
 | `return_all_messages` | bool | `False` | Return full event stream |
 | `auto_split` | bool | `False` | Auto-split large task into subtasks |
 | `system_prompt` | str | `""` | System-level instruction |
+| `use_cache` | bool | `False` | Return cached response for identical prompt+model |
+| `stream` | bool | `False` | Push response chunks in real-time via `ctx.info()` |
 | `timeout` | float | `300` | Timeout in seconds |
 
 ## CLI-Specific Parameters
@@ -106,3 +108,4 @@ Context parameters (`review_*`, `files`) are pre-built once and cannot be overri
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `reset` | bool | `False` | Clear counters after reading |
+| `clear_cache` | bool | `False` | Clear the response cache |

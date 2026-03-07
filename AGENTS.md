@@ -25,6 +25,7 @@ src/superai_mcp/
   git_utils.py    — get_git_diff(), read_files() with path traversal guard
   models.py       — CLIResult pydantic model, Sandbox enum
   openrouter.py   — fetch/check models from OpenRouter API (stdlib only)
+  cache.py        — in-memory LRU+TTL response cache (cachetools TTLCache)
   quota/          — account-level quota checking (per-provider modules)
 ```
 

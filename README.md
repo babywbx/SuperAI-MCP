@@ -30,6 +30,8 @@ Wraps **Gemini CLI**, **Codex CLI**, and **Claude CLI** as MCP tools, enabling C
 - 🏷️ **Tool annotations**: every tool includes `ToolAnnotations` metadata
 - 🤝 **Multi-model collaboration**: `chain` pipeline / `vote` consensus / `debate` iteration
 - 📊 **Quota checking**: real-time account-level usage quotas via local OAuth credentials (Claude/Codex/Gemini)
+- 🗄️ **Response cache**: opt-in in-memory LRU+TTL cache (`use_cache`) avoids redundant calls for identical prompts
+- 📡 **Streaming output**: opt-in real-time push of AI response chunks via MCP notifications (`stream`)
 
 ## 📦 Prerequisites
 
@@ -166,6 +168,8 @@ Restart the CLI after configuration.
 | `auto_split` | bool | `False` | Auto-split large task into subtasks |
 | `system_prompt` | str | `""` | System-level instruction (injected as `<system>` tag) |
 | `template` | str | `""` | Prompt template: `review`, `refactor`, `explain`, `test`, `debug`, `optimize` |
+| `use_cache` | bool | `False` | Return cached response for identical prompt+model (LRU+TTL) |
+| `stream` | bool | `False` | Push response chunks in real-time via `ctx.info()` |
 | `timeout` | float | `300` | Timeout in seconds |
 
 ### `gemini`
@@ -185,6 +189,8 @@ Restart the CLI after configuration.
 | `auto_split` | bool | `False` | Auto-split large task into subtasks |
 | `system_prompt` | str | `""` | System-level instruction (injected as `<system>` tag) |
 | `template` | str | `""` | Prompt template: `review`, `refactor`, `explain`, `test`, `debug`, `optimize` |
+| `use_cache` | bool | `False` | Return cached response for identical prompt+model (LRU+TTL) |
+| `stream` | bool | `False` | Push response chunks in real-time via `ctx.info()` |
 | `timeout` | float | `300` | Timeout in seconds |
 
 ### `claude`
@@ -206,6 +212,8 @@ Restart the CLI after configuration.
 | `auto_split` | bool | `False` | Auto-split large task into subtasks |
 | `system_prompt` | str | `""` | System-level instruction (injected as `<system>` tag) |
 | `template` | str | `""` | Prompt template: `review`, `refactor`, `explain`, `test`, `debug`, `optimize` |
+| `use_cache` | bool | `False` | Return cached response for identical prompt+model (LRU+TTL) |
+| `stream` | bool | `False` | Push response chunks in real-time via `ctx.info()` |
 | `timeout` | float | `300` | Timeout in seconds |
 
 ### `broadcast`
@@ -227,6 +235,8 @@ Broadcast the same prompt to multiple CLIs in parallel, returning aggregated res
 | `return_all_messages` | bool | `False` | Return full event stream |
 | `system_prompt` | str | `""` | System-level instruction (injected as `<system>` tag) |
 | `template` | str | `""` | Prompt template: `review`, `refactor`, `explain`, `test`, `debug`, `optimize` |
+| `use_cache` | bool | `False` | Return cached response for identical prompt+model (LRU+TTL) |
+| `stream` | bool | `False` | Push response chunks in real-time via `ctx.info()` |
 | `timeout` | float | `300` | Timeout in seconds |
 
 **Per-target overrides**: Use `overrides` to set any tool parameter individually per CLI target. Top-level parameters serve as defaults; `overrides` values take precedence. Priority for model: `overrides` > `models` > `model`.
@@ -324,6 +334,24 @@ Show cumulative token usage, call counts, and estimated cost (USD) across all CL
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `reset` | bool | `False` | Clear counters after reading |
+| `clear_cache` | bool | `False` | Clear the response cache |
+
+## 🗄️ Cache
+
+Opt-in in-memory response cache (LRU+TTL). When `use_cache=True`, identical requests (same prompt+model) return a cached result instantly, avoiding redundant CLI calls.
+
+- **Enable**: pass `use_cache=True` on `codex`/`gemini`/`claude`/`broadcast`
+- **Cache stats & clear**: use the `usage` tool to view hit/miss counts; pass `clear_cache=True` to clear
+- **Env vars**: `SUPERAI_MCP_CACHE_TTL` (default 300s), `SUPERAI_MCP_CACHE_MAXSIZE` (default 128)
+- **Not cached**: failed responses, fallback results, auto_split results, session resumes
+
+## 📡 Streaming Output
+
+Opt-in real-time push of AI response chunks via MCP `ctx.info()` notifications. When `stream=True`, content chunks are pushed as they arrive from the CLI, giving immediate visibility into long-running tasks.
+
+- **Enable**: pass `stream=True` on `codex`/`gemini`/`claude`/`broadcast`
+- Chunks are extracted from CLI stdout in real-time via an `on_output` callback
+- The final complete response is still returned as the tool result
 
 ## 🔍 Model Validation
 
