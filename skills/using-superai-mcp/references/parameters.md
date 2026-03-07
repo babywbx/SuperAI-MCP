@@ -15,7 +15,7 @@
 | `return_all_messages` | bool | `False` | Return full event stream |
 | `auto_split` | bool | `False` | Auto-split large task into subtasks |
 | `system_prompt` | str | `""` | System-level instruction |
-| `use_cache` | bool | `False` | Return cached response for identical prompt+model |
+| `use_cache` | bool | `False` | Return cached response for identical request (keyed by cli+cd+prompt+model) |
 | `stream` | bool | `False` | Push response chunks in real-time via `ctx.info()` |
 | `timeout` | float | `300` | Timeout in seconds |
 

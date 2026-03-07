@@ -168,7 +168,7 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
 | `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
 | `template` | str | `""` | 提示模板: `review`、`refactor`、`explain`、`test`、`debug`、`optimize` |
-| `use_cache` | bool | `False` | 相同 prompt+model 返回缓存结果 (LRU+TTL) |
+| `use_cache` | bool | `False` | 相同请求返回缓存结果 (LRU+TTL, key 含 cli+cd+prompt+model) |
 | `stream` | bool | `False` | 通过 `ctx.info()` 实时推送响应片段 |
 | `timeout` | float | `300` | 超时秒数 |
 
@@ -189,7 +189,7 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
 | `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
 | `template` | str | `""` | 提示模板: `review`、`refactor`、`explain`、`test`、`debug`、`optimize` |
-| `use_cache` | bool | `False` | 相同 prompt+model 返回缓存结果 (LRU+TTL) |
+| `use_cache` | bool | `False` | 相同请求返回缓存结果 (LRU+TTL, key 含 cli+cd+prompt+model) |
 | `stream` | bool | `False` | 通过 `ctx.info()` 实时推送响应片段 |
 | `timeout` | float | `300` | 超时秒数 |
 
@@ -212,7 +212,7 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
 | `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
 | `template` | str | `""` | 提示模板: `review`、`refactor`、`explain`、`test`、`debug`、`optimize` |
-| `use_cache` | bool | `False` | 相同 prompt+model 返回缓存结果 (LRU+TTL) |
+| `use_cache` | bool | `False` | 相同请求返回缓存结果 (LRU+TTL, key 含 cli+cd+prompt+model) |
 | `stream` | bool | `False` | 通过 `ctx.info()` 实时推送响应片段 |
 | `timeout` | float | `300` | 超时秒数 |
 
@@ -235,7 +235,7 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `return_all_messages` | bool | `False` | 返回完整事件流 |
 | `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
 | `template` | str | `""` | 提示模板: `review`、`refactor`、`explain`、`test`、`debug`、`optimize` |
-| `use_cache` | bool | `False` | 相同 prompt+model 返回缓存结果 (LRU+TTL) |
+| `use_cache` | bool | `False` | 相同请求返回缓存结果 (LRU+TTL, key 含 cli+cd+prompt+model) |
 | `stream` | bool | `False` | 通过 `ctx.info()` 实时推送响应片段 |
 | `timeout` | float | `300` | 超时秒数 |
 
@@ -338,7 +338,7 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 
 ## 🗄️ 响应缓存
 
-可选的内存响应缓存 (LRU+TTL)。开启 `use_cache=True` 后，相同请求（相同 prompt+model）直接返回缓存结果，避免重复 CLI 调用。
+可选的内存响应缓存 (LRU+TTL)。开启 `use_cache=True` 后，相同请求（相同 cli+cd+prompt+model）直接返回缓存结果，避免重复 CLI 调用。不同 provider 和工作目录的缓存互相隔离。
 
 - **启用**：在 `codex`/`gemini`/`claude`/`broadcast` 上传入 `use_cache=True`
 - **缓存统计与清除**：通过 `usage` 工具查看命中/未命中次数；传入 `clear_cache=True` 清除缓存

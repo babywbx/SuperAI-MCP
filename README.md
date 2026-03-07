@@ -168,7 +168,7 @@ Restart the CLI after configuration.
 | `auto_split` | bool | `False` | Auto-split large task into subtasks |
 | `system_prompt` | str | `""` | System-level instruction (injected as `<system>` tag) |
 | `template` | str | `""` | Prompt template: `review`, `refactor`, `explain`, `test`, `debug`, `optimize` |
-| `use_cache` | bool | `False` | Return cached response for identical prompt+model (LRU+TTL) |
+| `use_cache` | bool | `False` | Return cached response for identical request (LRU+TTL, keyed by cli+cd+prompt+model) |
 | `stream` | bool | `False` | Push response chunks in real-time via `ctx.info()` |
 | `timeout` | float | `300` | Timeout in seconds |
 
@@ -189,7 +189,7 @@ Restart the CLI after configuration.
 | `auto_split` | bool | `False` | Auto-split large task into subtasks |
 | `system_prompt` | str | `""` | System-level instruction (injected as `<system>` tag) |
 | `template` | str | `""` | Prompt template: `review`, `refactor`, `explain`, `test`, `debug`, `optimize` |
-| `use_cache` | bool | `False` | Return cached response for identical prompt+model (LRU+TTL) |
+| `use_cache` | bool | `False` | Return cached response for identical request (LRU+TTL, keyed by cli+cd+prompt+model) |
 | `stream` | bool | `False` | Push response chunks in real-time via `ctx.info()` |
 | `timeout` | float | `300` | Timeout in seconds |
 
@@ -212,7 +212,7 @@ Restart the CLI after configuration.
 | `auto_split` | bool | `False` | Auto-split large task into subtasks |
 | `system_prompt` | str | `""` | System-level instruction (injected as `<system>` tag) |
 | `template` | str | `""` | Prompt template: `review`, `refactor`, `explain`, `test`, `debug`, `optimize` |
-| `use_cache` | bool | `False` | Return cached response for identical prompt+model (LRU+TTL) |
+| `use_cache` | bool | `False` | Return cached response for identical request (LRU+TTL, keyed by cli+cd+prompt+model) |
 | `stream` | bool | `False` | Push response chunks in real-time via `ctx.info()` |
 | `timeout` | float | `300` | Timeout in seconds |
 
@@ -235,7 +235,7 @@ Broadcast the same prompt to multiple CLIs in parallel, returning aggregated res
 | `return_all_messages` | bool | `False` | Return full event stream |
 | `system_prompt` | str | `""` | System-level instruction (injected as `<system>` tag) |
 | `template` | str | `""` | Prompt template: `review`, `refactor`, `explain`, `test`, `debug`, `optimize` |
-| `use_cache` | bool | `False` | Return cached response for identical prompt+model (LRU+TTL) |
+| `use_cache` | bool | `False` | Return cached response for identical request (LRU+TTL, keyed by cli+cd+prompt+model) |
 | `stream` | bool | `False` | Push response chunks in real-time via `ctx.info()` |
 | `timeout` | float | `300` | Timeout in seconds |
 
@@ -338,7 +338,7 @@ Show cumulative token usage, call counts, and estimated cost (USD) across all CL
 
 ## 🗄️ Cache
 
-Opt-in in-memory response cache (LRU+TTL). When `use_cache=True`, identical requests (same prompt+model) return a cached result instantly, avoiding redundant CLI calls.
+Opt-in in-memory response cache (LRU+TTL). When `use_cache=True`, identical requests (same cli+cd+prompt+model) return a cached result instantly, avoiding redundant CLI calls. Different providers and working directories are cached separately.
 
 - **Enable**: pass `use_cache=True` on `codex`/`gemini`/`claude`/`broadcast`
 - **Cache stats & clear**: use the `usage` tool to view hit/miss counts; pass `clear_cache=True` to clear
