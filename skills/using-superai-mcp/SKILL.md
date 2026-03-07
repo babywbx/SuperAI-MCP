@@ -29,7 +29,7 @@ claude(prompt="refactor this", cd="/path/to/project")
 | `debate` | Alternating rounds | Explore trade-offs between two models |
 | `list-models` | Discover models | Find available model IDs from OpenRouter |
 | `status` | CLI health check | Verify availability + auth (+ optional quota) |
-| `usage` | Token accounting | Track cumulative usage, optional reset |
+| `usage` | Token accounting | Track cumulative usage, cache stats, optional reset/clear |
 | `quota` | Account-level quotas | Check rate limits before heavy work |
 
 ## Model Selection
@@ -78,6 +78,8 @@ debate(prompt="...", cd="...", side_a="codex", side_b="claude", rounds=3)
 | Not saving `session_id` | Store it from response for multi-turn conversations |
 | Calling `gemini` without model | Pass `model="gemini-3.1-pro-preview"` for latest |
 | Running multiple reviews separately | Use `broadcast` — builds context once, fans out in parallel |
+| Repeating identical prompts | Pass `use_cache=True` to reuse cached responses |
+| No visibility during long tasks | Pass `stream=True` to get real-time response chunks |
 
 ## References
 

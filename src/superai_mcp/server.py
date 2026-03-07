@@ -21,6 +21,7 @@ from superai_mcp.parsers import (
     parse_codex_output,
     parse_gemini_output,
 )
+from superai_mcp.cache import cache_clear, cache_get, cache_key, cache_put, cache_stats
 from superai_mcp.runner import run_cli
 from superai_mcp.splitter import run_auto_split
 from superai_mcp.validate import (
@@ -330,6 +331,64 @@ def _make_progress_cb(
     return _cb
 
 
+def _extract_content_chunk(line: str, cli: str) -> str:
+    """Extract assistant content from a CLI output line. Returns empty if not content."""
+    try:
+        obj = json.loads(line)
+    except (json.JSONDecodeError, ValueError):
+        return ""
+    if not isinstance(obj, dict):
+        return ""
+    etype = obj.get("type", "")
+
+    if cli == "codex":
+        if etype == "item.completed":
+            item = obj.get("item")
+            if isinstance(item, dict) and item.get("type") == "agent_message":
+                text = item.get("text", "")
+                return text if isinstance(text, str) else ""
+
+    elif cli == "gemini":
+        if etype == "message" and obj.get("role") == "assistant":
+            content = obj.get("content", "")
+            return content if isinstance(content, str) else ""
+
+    elif cli == "claude":
+        if etype == "assistant":
+            msg = obj.get("message")
+            if isinstance(msg, dict):
+                blocks = msg.get("content", [])
+                if isinstance(blocks, list):
+                    texts: list[str] = []
+                    for block in blocks:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            t = block.get("text", "")
+                            if isinstance(t, str) and t:
+                                texts.append(t)
+                    return "".join(texts)
+        if etype == "result":
+            text = obj.get("result", "")
+            return text if isinstance(text, str) else ""
+
+    return ""
+
+
+def _make_stream_cb(
+    ctx: Context | None,
+    cli: str,
+) -> Callable[[str], Awaitable[None]] | None:
+    """Build an on_output callback that pushes content chunks via ctx.info()."""
+    if ctx is None:
+        return None
+
+    async def _cb(line: str) -> None:
+        chunk = _extract_content_chunk(line, cli)
+        if chunk:
+            await ctx.info(chunk)
+
+    return _cb
+
+
 # Prompt templates — structured wrappers invokable by name
 _TEMPLATES: dict[str, str] = {
     "review": (
@@ -432,6 +491,8 @@ async def codex_tool(
     auto_split: bool = False,
     system_prompt: str = "",
     template: str = "",
+    use_cache: bool = False,
+    stream: bool = False,
     timeout: float = 300.0,
 ) -> str:
     """Run Codex CLI for coding tasks, code review, or general prompts.
@@ -485,6 +546,12 @@ async def codex_tool(
             files=files,
             system_prompt=system_prompt,
         )
+
+        if use_cache and not session_id and not auto_split:
+            _ck = cache_key("codex", cd, effective_prompt, model)
+            cached = cache_get(_ck)
+            if cached is not None:
+                return cached
 
         if auto_split:
             async def _call(p: str, timeout: float) -> CLIResult:
@@ -561,11 +628,12 @@ async def codex_tool(
             args.extend(prompt_args)
 
         progress_cb = _make_progress_cb(ctx, "codex", timeout)
+        stream_cb = _make_stream_cb(ctx, "codex") if stream else None
         result = None
         try:
             result = await run_cli(
                 "codex", args, cwd=cd, env=env, stdin_data=stdin_data,
-                on_progress=progress_cb, timeout=timeout,
+                on_progress=progress_cb, on_output=stream_cb, timeout=timeout,
             )
             parsed = parse_codex_output(result.stdout_lines, return_all=return_all_messages)
             if not parsed.model:
@@ -623,7 +691,8 @@ async def codex_tool(
                     retry_result = await run_cli(
                         "codex", retry_args, cwd=cd, env=env,
                         stdin_data=retry_stdin,
-                        on_progress=progress_cb, timeout=timeout,
+                        on_progress=progress_cb, on_output=stream_cb,
+                        timeout=timeout,
                     )
                 except asyncio.TimeoutError:
                     continue  # retry timed out, try next tier
@@ -644,8 +713,11 @@ async def codex_tool(
                 msg = f"{msg} (hint: {model_warning})"
             parsed = parsed.model_copy(update={"content": msg})
 
+        response = parsed.model_dump_json(exclude_none=True)
+        if use_cache and parsed.success and not session_id and "[fallback:" not in parsed.content:
+            cache_put(cache_key("codex", cd, effective_prompt, model), response)
         _track_usage("codex", parsed.usage, parsed.model)
-        return parsed.model_dump_json(exclude_none=True)
+        return response
     except ValueError as e:
         return _err(str(e))
     except Exception:
@@ -670,6 +742,8 @@ async def gemini_tool(
     auto_split: bool = False,
     system_prompt: str = "",
     template: str = "",
+    use_cache: bool = False,
+    stream: bool = False,
     timeout: float = 300.0,
 ) -> str:
     """Run Gemini CLI for coding tasks, code review, or general prompts.
@@ -714,6 +788,12 @@ async def gemini_tool(
             files=files,
             system_prompt=system_prompt,
         )
+
+        if use_cache and not session_id and not auto_split:
+            _ck = cache_key("gemini", cd, effective_prompt, model)
+            cached = cache_get(_ck)
+            if cached is not None:
+                return cached
 
         if not sandbox and not os.environ.get("SUPERAI_ALLOW_DANGEROUS"):
             return _err(
@@ -773,11 +853,12 @@ async def gemini_tool(
             args.extend(["--resume", session_id])
 
         progress_cb = _make_progress_cb(ctx, "gemini", timeout)
+        stream_cb = _make_stream_cb(ctx, "gemini") if stream else None
         result = None
         try:
             result = await run_cli(
                 "gemini", args, cwd=cd, env=env, stdin_data=stdin_data,
-                on_progress=progress_cb, timeout=timeout,
+                on_progress=progress_cb, on_output=stream_cb, timeout=timeout,
             )
             parsed = parse_gemini_output(result.stdout_lines, return_all=return_all_messages)
             if not parsed.model:
@@ -797,7 +878,7 @@ async def gemini_tool(
             try:
                 retry_result = await run_cli(
                     "gemini", retry_args, cwd=cd, env=env, stdin_data=retry_stdin,
-                    on_progress=progress_cb, timeout=timeout,
+                    on_progress=progress_cb, on_output=stream_cb, timeout=timeout,
                 )
             except asyncio.TimeoutError:
                 retry_result = None
@@ -814,8 +895,11 @@ async def gemini_tool(
                 msg = f"{msg} (hint: {model_warning})"
             parsed = parsed.model_copy(update={"content": msg})
 
+        response = parsed.model_dump_json(exclude_none=True)
+        if use_cache and parsed.success and not session_id and "[fallback:" not in parsed.content:
+            cache_put(cache_key("gemini", cd, effective_prompt, model), response)
         _track_usage("gemini", parsed.usage, parsed.model)
-        return parsed.model_dump_json(exclude_none=True)
+        return response
     except ValueError as e:
         return _err(str(e))
     except Exception:
@@ -849,6 +933,8 @@ async def claude_tool(
     auto_split: bool = False,
     system_prompt: str = "",
     template: str = "",
+    use_cache: bool = False,
+    stream: bool = False,
     timeout: float = 300.0,
 ) -> str:
     """Run Claude CLI for coding tasks, code review, or general prompts.
@@ -894,6 +980,12 @@ async def claude_tool(
             files=files,
             system_prompt=system_prompt,
         )
+
+        if use_cache and not session_id and not auto_split:
+            _ck = cache_key("claude", cd, effective_prompt, model)
+            cached = cache_get(_ck)
+            if cached is not None:
+                return cached
 
         # Sandbox mapping (needed for both auto_split and normal paths)
         sandbox_args: list[str] = []
@@ -968,11 +1060,12 @@ async def claude_tool(
 
         env = _child_env(_claude_env())
         progress_cb = _make_progress_cb(ctx, "claude", timeout)
+        stream_cb = _make_stream_cb(ctx, "claude") if stream else None
         result = None
         try:
             result = await run_cli(
                 "claude", args, cwd=cd, env=env, stdin_data=stdin_data,
-                on_progress=progress_cb, timeout=timeout,
+                on_progress=progress_cb, on_output=stream_cb, timeout=timeout,
             )
             parsed = parse_claude_stream_output(result.stdout_lines, return_all=return_all_messages)
             if not parsed.model:
@@ -1019,7 +1112,8 @@ async def claude_tool(
                 try:
                     retry_result = await run_cli(
                         "claude", retry_args, cwd=cd, env=env, stdin_data=retry_stdin,
-                        on_progress=progress_cb, timeout=timeout,
+                        on_progress=progress_cb, on_output=stream_cb,
+                        timeout=timeout,
                     )
                 except asyncio.TimeoutError:
                     continue  # retry timed out, try next tier
@@ -1041,8 +1135,11 @@ async def claude_tool(
                 msg = f"{msg} (hint: {model_warning})"
             parsed = parsed.model_copy(update={"content": msg})
 
+        response = parsed.model_dump_json(exclude_none=True)
+        if use_cache and parsed.success and not session_id and "[fallback:" not in parsed.content:
+            cache_put(cache_key("claude", cd, effective_prompt, model), response)
         _track_usage("claude", parsed.usage, parsed.model)
-        return parsed.model_dump_json(exclude_none=True)
+        return response
     except ValueError as e:
         return _err(str(e))
     except Exception:
@@ -1076,6 +1173,8 @@ async def broadcast_tool(
     return_all_messages: bool = False,
     system_prompt: str = "",
     template: str = "",
+    use_cache: bool = False,
+    stream: bool = False,
     timeout: float = 300.0,
 ) -> str:
     """Broadcast the same prompt to multiple CLI tools in parallel.
@@ -1154,6 +1253,8 @@ async def broadcast_tool(
         "files": None,
         "return_all_messages": return_all_messages,
         "system_prompt": system_prompt,
+        "use_cache": use_cache,
+        "stream": stream,
         "timeout": timeout,
     }
 
@@ -1552,12 +1653,13 @@ async def list_models_tool(
 @mcp.tool(name="usage", annotations=ToolAnnotations(
     readOnlyHint=False, destructiveHint=False, idempotentHint=False,
 ))
-async def usage_tool(reset: bool = False) -> str:
+async def usage_tool(reset: bool = False, clear_cache: bool = False) -> str:
     """Show cumulative token usage, call counts, and estimated cost across all CLI tools.
 
     Returns per-CLI and total stats with estimated_cost_usd.
     Cost is estimated from OpenRouter pricing data (best-effort).
     Set reset=True to clear counters after reading.
+    Set clear_cache=True to purge the response cache.
     """
     await _ensure_pricing()
 
@@ -1575,6 +1677,10 @@ async def usage_tool(reset: bool = False) -> str:
     for cli in ("codex", "gemini", "claude"):
         result[cli] = dict(_usage[cli])
     result["total"] = total
+    result["cache"] = cache_stats()
+
+    if clear_cache:
+        cache_clear()
 
     if reset:
         _reset_usage()
