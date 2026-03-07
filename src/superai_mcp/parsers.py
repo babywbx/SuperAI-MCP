@@ -300,6 +300,27 @@ def is_rate_limited(result: CLIResult) -> bool:
 # Backward-compatible alias
 is_quota_exhausted = is_rate_limited
 
+_RETRYABLE_PATTERNS = _RATE_LIMIT_PATTERNS + (
+    "internal server error",  # HTTP 500
+    "service unavailable",    # HTTP 503
+    "bad gateway",            # HTTP 502
+    "gateway timeout",        # HTTP 504
+    "server error",           # generic
+    "temporarily unavailable",
+    "timed out",              # timeout (set by tool handler)
+)
+
+
+def is_retryable(result: CLIResult) -> bool:
+    """Check if result indicates a retryable transient error.
+
+    Superset of is_rate_limited — also covers server errors and timeouts.
+    """
+    if result.success:
+        return False
+    lower = result.content.lower()
+    return any(p.lower() in lower for p in _RETRYABLE_PATTERNS)
+
 
 def parse_gemini_output(
     lines: list[str],

@@ -16,6 +16,7 @@ from superai_mcp.quota import fetch_quota, fetch_all_quotas, quota_result_to_dic
 from superai_mcp.models import CLIResult, Sandbox
 from superai_mcp.parsers import (
     is_rate_limited,
+    is_retryable,
     parse_claude_stream_output,
     parse_codex_output,
     parse_gemini_output,
@@ -457,16 +458,20 @@ async def codex_tool(
             args.extend(prompt_args)
 
         progress_cb = _make_progress_cb(ctx, "codex", timeout)
-        result = await run_cli(
-            "codex", args, cwd=cd, env=env, stdin_data=stdin_data,
-            on_progress=progress_cb, timeout=timeout,
-        )
-        parsed = parse_codex_output(result.stdout_lines, return_all=return_all_messages)
-        if not parsed.model:
-            parsed = parsed.model_copy(update={"model": model or None})
+        result = None
+        try:
+            result = await run_cli(
+                "codex", args, cwd=cd, env=env, stdin_data=stdin_data,
+                on_progress=progress_cb, timeout=timeout,
+            )
+            parsed = parse_codex_output(result.stdout_lines, return_all=return_all_messages)
+            if not parsed.model:
+                parsed = parsed.model_copy(update={"model": model or None})
+        except asyncio.TimeoutError:
+            parsed = CLIResult(success=False, content="codex timed out")
 
-        # Cascade fallback on rate limit: degrade reasoning_effort high → medium → low
-        if is_rate_limited(parsed) and not session_id:
+        # Cascade fallback on retryable error: degrade reasoning_effort high → medium → low
+        if is_retryable(parsed) and not session_id:
             effective_effort = reasoning_effort or "high"
             eff_idx = (
                 _CODEX_EFFORT_CHAIN.index(effective_effort)
@@ -485,15 +490,18 @@ async def codex_tool(
                     probe_args.extend(["-m", model])
                 probe_args.extend(["-c", f"model_reasoning_effort={next_effort}"])
                 probe_args.extend(["--", _PROBE_PROMPT])
-                probe_result = await run_cli(
-                    "codex", probe_args, cwd=cd, env=env,
-                    timeout=_PROBE_TIMEOUT,
-                )
+                try:
+                    probe_result = await run_cli(
+                        "codex", probe_args, cwd=cd, env=env,
+                        timeout=_PROBE_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    continue  # probe timed out, try next tier
                 probe_parsed = parse_codex_output(probe_result.stdout_lines)
                 if not probe_parsed.success:
-                    if is_rate_limited(probe_parsed):
-                        continue  # this level also rate-limited, try next
-                    break  # different error, stop
+                    if is_retryable(probe_parsed):
+                        continue  # this level also unavailable, try next
+                    break  # non-retryable error, stop
                 # Probe OK — send the real prompt
                 retry_prompt_args, retry_stdin = _codex_prompt_args(
                     effective_prompt,
@@ -508,11 +516,14 @@ async def codex_tool(
                     retry_args.extend(["-m", model])
                 retry_args.extend(["-c", f"model_reasoning_effort={next_effort}"])
                 retry_args.extend(retry_prompt_args)
-                retry_result = await run_cli(
-                    "codex", retry_args, cwd=cd, env=env,
-                    stdin_data=retry_stdin,
-                    on_progress=progress_cb, timeout=timeout,
-                )
+                try:
+                    retry_result = await run_cli(
+                        "codex", retry_args, cwd=cd, env=env,
+                        stdin_data=retry_stdin,
+                        on_progress=progress_cb, timeout=timeout,
+                    )
+                except asyncio.TimeoutError:
+                    continue  # retry timed out, try next tier
                 parsed = parse_codex_output(
                     retry_result.stdout_lines, return_all=return_all_messages,
                 )
@@ -521,10 +532,10 @@ async def codex_tool(
                         "content": f"[fallback: effort={next_effort}] {parsed.content}",
                     })
                     break
-                if not is_rate_limited(parsed):
-                    break  # different error, stop
-                # still rate-limited — continue to next tier
-        elif result.returncode != 0 and not parsed.success:
+                if not is_retryable(parsed):
+                    break  # non-retryable error, stop
+                # still retryable — continue to next tier
+        elif result is not None and result.returncode != 0 and not parsed.success:
             msg = f"codex exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
             if model_warning:
                 msg = f"{msg} (hint: {model_warning})"
@@ -532,9 +543,6 @@ async def codex_tool(
 
         _track_usage("codex", parsed.usage)
         return parsed.model_dump_json(exclude_none=True)
-
-    except asyncio.TimeoutError:
-        return _err("codex timed out")
     except ValueError as e:
         return _err(str(e))
     except Exception:
@@ -659,16 +667,20 @@ async def gemini_tool(
             args.extend(["--resume", session_id])
 
         progress_cb = _make_progress_cb(ctx, "gemini", timeout)
-        result = await run_cli(
-            "gemini", args, cwd=cd, env=env, stdin_data=stdin_data,
-            on_progress=progress_cb, timeout=timeout,
-        )
-        parsed = parse_gemini_output(result.stdout_lines, return_all=return_all_messages)
-        if not parsed.model:
-            parsed = parsed.model_copy(update={"model": model or None})
+        result = None
+        try:
+            result = await run_cli(
+                "gemini", args, cwd=cd, env=env, stdin_data=stdin_data,
+                on_progress=progress_cb, timeout=timeout,
+            )
+            parsed = parse_gemini_output(result.stdout_lines, return_all=return_all_messages)
+            if not parsed.model:
+                parsed = parsed.model_copy(update={"model": model or None})
+        except asyncio.TimeoutError:
+            parsed = CLIResult(success=False, content="gemini timed out")
 
-        # Quota fallback: retry once with flash model (check before overwriting content)
-        if is_rate_limited(parsed) and model != "flash":
+        # Fallback on retryable error: retry once with flash model
+        if is_retryable(parsed) and model != "flash":
             retry_prompt_args, retry_stdin = _gemini_prompt_args(effective_prompt)
             retry_args = retry_prompt_args + ["-o", "stream-json"]
             if sandbox:
@@ -676,17 +688,21 @@ async def gemini_tool(
             retry_args.extend(["--model", "flash"])
             if session_id:
                 retry_args.extend(["--resume", session_id])
-            retry_result = await run_cli(
-                "gemini", retry_args, cwd=cd, env=env, stdin_data=retry_stdin,
-                on_progress=progress_cb, timeout=timeout,
-            )
-            parsed = parse_gemini_output(retry_result.stdout_lines, return_all=return_all_messages)
-            if parsed.success:
-                parsed = parsed.model_copy(update={
-                    "content": f"[fallback: flash] {parsed.content}",
-                    "model": parsed.model or "flash",
-                })
-        elif result.returncode != 0 and not parsed.success:
+            try:
+                retry_result = await run_cli(
+                    "gemini", retry_args, cwd=cd, env=env, stdin_data=retry_stdin,
+                    on_progress=progress_cb, timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                retry_result = None
+            if retry_result is not None:
+                parsed = parse_gemini_output(retry_result.stdout_lines, return_all=return_all_messages)
+                if parsed.success:
+                    parsed = parsed.model_copy(update={
+                        "content": f"[fallback: flash] {parsed.content}",
+                        "model": parsed.model or "flash",
+                    })
+        elif result is not None and result.returncode != 0 and not parsed.success:
             msg = f"gemini exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
             if model_warning:
                 msg = f"{msg} (hint: {model_warning})"
@@ -694,9 +710,6 @@ async def gemini_tool(
 
         _track_usage("gemini", parsed.usage)
         return parsed.model_dump_json(exclude_none=True)
-
-    except asyncio.TimeoutError:
-        return _err("gemini timed out")
     except ValueError as e:
         return _err(str(e))
     except Exception:
@@ -846,16 +859,20 @@ async def claude_tool(
 
         env = _child_env(_claude_env())
         progress_cb = _make_progress_cb(ctx, "claude", timeout)
-        result = await run_cli(
-            "claude", args, cwd=cd, env=env, stdin_data=stdin_data,
-            on_progress=progress_cb, timeout=timeout,
-        )
-        parsed = parse_claude_stream_output(result.stdout_lines, return_all=return_all_messages)
-        if not parsed.model:
-            parsed = parsed.model_copy(update={"model": model or None})
+        result = None
+        try:
+            result = await run_cli(
+                "claude", args, cwd=cd, env=env, stdin_data=stdin_data,
+                on_progress=progress_cb, timeout=timeout,
+            )
+            parsed = parse_claude_stream_output(result.stdout_lines, return_all=return_all_messages)
+            if not parsed.model:
+                parsed = parsed.model_copy(update={"model": model or None})
+        except asyncio.TimeoutError:
+            parsed = CLIResult(success=False, content="claude timed out")
 
-        # Cascade fallback on rate limit: current → sonnet → haiku
-        if is_rate_limited(parsed):
+        # Cascade fallback on retryable error: current → sonnet → haiku
+        if is_retryable(parsed):
             # Only try models strictly below the current model in the chain
             start = 0
             for i, m in enumerate(_CLAUDE_FALLBACK_CHAIN):
@@ -867,14 +884,17 @@ async def claude_tool(
                 probe_args = ["-p", _PROBE_PROMPT, "--output-format", "stream-json", "--verbose",
                               "--model", fallback_model]
                 probe_args.extend(sandbox_args)
-                probe_result = await run_cli(
-                    "claude", probe_args, cwd=cd, env=env, timeout=_PROBE_TIMEOUT,
-                )
+                try:
+                    probe_result = await run_cli(
+                        "claude", probe_args, cwd=cd, env=env, timeout=_PROBE_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    continue  # probe timed out, try next tier
                 probe_parsed = parse_claude_stream_output(probe_result.stdout_lines)
                 if not probe_parsed.success:
-                    if is_rate_limited(probe_parsed):
-                        continue  # this level also rate-limited, try next
-                    break  # different error, stop
+                    if is_retryable(probe_parsed):
+                        continue  # this level also unavailable, try next
+                    break  # non-retryable error, stop
                 # Probe OK — send the real prompt
                 retry_prompt_args, retry_stdin = _claude_prompt_args(
                     effective_prompt,
@@ -887,10 +907,13 @@ async def claude_tool(
                 if max_budget_usd > 0:
                     retry_args.extend(["--max-budget-usd", str(max_budget_usd)])
                 retry_args.extend(sandbox_args)
-                retry_result = await run_cli(
-                    "claude", retry_args, cwd=cd, env=env, stdin_data=retry_stdin,
-                    on_progress=progress_cb, timeout=timeout,
-                )
+                try:
+                    retry_result = await run_cli(
+                        "claude", retry_args, cwd=cd, env=env, stdin_data=retry_stdin,
+                        on_progress=progress_cb, timeout=timeout,
+                    )
+                except asyncio.TimeoutError:
+                    continue  # retry timed out, try next tier
                 parsed = parse_claude_stream_output(
                     retry_result.stdout_lines, return_all=return_all_messages,
                 )
@@ -900,10 +923,10 @@ async def claude_tool(
                         "model": parsed.model or fallback_model,
                     })
                     break
-                if not is_rate_limited(parsed):
-                    break  # different error, stop
-                # still rate-limited — continue to next tier
-        elif result.returncode != 0 and not parsed.success:
+                if not is_retryable(parsed):
+                    break  # non-retryable error, stop
+                # still retryable — continue to next tier
+        elif result is not None and result.returncode != 0 and not parsed.success:
             msg = f"claude exited with code {result.returncode}: {_safe_stderr(result.stderr)}"
             if model_warning:
                 msg = f"{msg} (hint: {model_warning})"
@@ -911,9 +934,6 @@ async def claude_tool(
 
         _track_usage("claude", parsed.usage)
         return parsed.model_dump_json(exclude_none=True)
-
-    except asyncio.TimeoutError:
-        return _err("claude timed out")
     except ValueError as e:
         return _err(str(e))
     except Exception:

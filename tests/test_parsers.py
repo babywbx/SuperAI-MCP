@@ -3,6 +3,7 @@
 from superai_mcp.parsers import (
     is_quota_exhausted,
     is_rate_limited,
+    is_retryable,
     parse_claude_output,
     parse_claude_stream_output,
     parse_codex_output,
@@ -396,6 +397,48 @@ class TestIsRateLimited:
         r = CLIResult(success=False, content="RESOURCE_EXHAUSTED")
         assert is_quota_exhausted(r) is True
         assert is_quota_exhausted is is_rate_limited
+
+
+class TestIsRetryable:
+    def test_rate_limit_is_retryable(self) -> None:
+        r = CLIResult(success=False, content="429 Too Many Requests")
+        assert is_retryable(r) is True
+
+    def test_server_error(self) -> None:
+        r = CLIResult(success=False, content="500 internal server error")
+        assert is_retryable(r) is True
+
+    def test_service_unavailable(self) -> None:
+        r = CLIResult(success=False, content="503 service unavailable")
+        assert is_retryable(r) is True
+
+    def test_bad_gateway(self) -> None:
+        r = CLIResult(success=False, content="502 bad gateway")
+        assert is_retryable(r) is True
+
+    def test_gateway_timeout(self) -> None:
+        r = CLIResult(success=False, content="504 gateway timeout")
+        assert is_retryable(r) is True
+
+    def test_timed_out(self) -> None:
+        r = CLIResult(success=False, content="codex timed out")
+        assert is_retryable(r) is True
+
+    def test_temporarily_unavailable(self) -> None:
+        r = CLIResult(success=False, content="model temporarily unavailable")
+        assert is_retryable(r) is True
+
+    def test_auth_error_not_retryable(self) -> None:
+        r = CLIResult(success=False, content="401 Unauthorized")
+        assert is_retryable(r) is False
+
+    def test_success_not_retryable(self) -> None:
+        r = CLIResult(success=True, content="server error in response")
+        assert is_retryable(r) is False
+
+    def test_unknown_error_not_retryable(self) -> None:
+        r = CLIResult(success=False, content="unknown parse failure")
+        assert is_retryable(r) is False
 
 
 class TestGeminiParser:

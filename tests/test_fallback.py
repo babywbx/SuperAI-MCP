@@ -1,5 +1,6 @@
-"""Tests for rate-limit cascade fallback across all CLIs."""
+"""Tests for retryable error cascade fallback across all CLIs."""
 
+import asyncio
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -555,4 +556,159 @@ class TestCodexFallback:
 
         assert result["success"] is True
         assert "[fallback: effort=high]" in result["content"]
+        assert _mock_run_cli.call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# Timeout fallback: initial call times out → retry with degraded config
+# ---------------------------------------------------------------------------
+
+class TestTimeoutFallback:
+    @pytest.mark.usefixtures("_mock_which_gemini")
+    async def test_gemini_timeout_fallback_to_flash(self, _mock_run_cli: AsyncMock) -> None:
+        """Gemini times out → retry with flash succeeds."""
+        _mock_run_cli.side_effect = [
+            asyncio.TimeoutError(),
+            ProcessResult(returncode=0, stdout_lines=_gemini_lines("flash response"), stderr=""),
+        ]
+
+        raw = await gemini_tool(prompt="hello", cd="/tmp")
+        result = json.loads(raw)
+
+        assert result["success"] is True
+        assert "[fallback: flash]" in result["content"]
+        assert _mock_run_cli.call_count == 2
+
+    @pytest.mark.usefixtures("_mock_which_gemini")
+    async def test_gemini_timeout_no_fallback_already_flash(self, _mock_run_cli: AsyncMock) -> None:
+        """Gemini with model=flash times out → no fallback."""
+        _mock_run_cli.side_effect = asyncio.TimeoutError()
+
+        raw = await gemini_tool(prompt="hello", cd="/tmp", model="flash")
+        result = json.loads(raw)
+
+        assert result["success"] is False
+        assert "timed out" in result["content"]
+        assert _mock_run_cli.call_count == 1
+
+    @pytest.mark.usefixtures("_mock_which_claude")
+    async def test_claude_timeout_fallback_to_sonnet(self, _mock_run_cli: AsyncMock) -> None:
+        """Claude times out → probe sonnet OK → retry with sonnet succeeds."""
+        _mock_run_cli.side_effect = [
+            asyncio.TimeoutError(),
+            ProcessResult(returncode=0, stdout_lines=_claude_lines("ok"), stderr=""),
+            ProcessResult(returncode=0, stdout_lines=_claude_lines("sonnet response"), stderr=""),
+        ]
+
+        raw = await claude_tool(prompt="hello", cd="/tmp")
+        result = json.loads(raw)
+
+        assert result["success"] is True
+        assert "[fallback: sonnet]" in result["content"]
+        assert _mock_run_cli.call_count == 3
+
+    @pytest.mark.usefixtures("_mock_which_codex")
+    async def test_codex_timeout_fallback_to_medium(self, _mock_run_cli: AsyncMock) -> None:
+        """Codex times out → probe medium OK → retry with medium succeeds."""
+        _mock_run_cli.side_effect = [
+            asyncio.TimeoutError(),
+            ProcessResult(returncode=0, stdout_lines=_codex_lines("ok"), stderr=""),
+            ProcessResult(returncode=0, stdout_lines=_codex_lines("medium answer"), stderr=""),
+        ]
+
+        raw = await codex_tool(prompt="hello", cd="/tmp")
+        result = json.loads(raw)
+
+        assert result["success"] is True
+        assert "[fallback: effort=medium]" in result["content"]
+        assert _mock_run_cli.call_count == 3
+
+    @pytest.mark.usefixtures("_mock_which_codex")
+    async def test_codex_timeout_no_fallback_with_session(self, _mock_run_cli: AsyncMock) -> None:
+        """Codex with session_id times out → no fallback."""
+        _mock_run_cli.side_effect = asyncio.TimeoutError()
+
+        raw = await codex_tool(
+            prompt="hello", cd="/tmp",
+            session_id="abcd1234-5678-9abc-def0-123456789abc",
+        )
+        result = json.loads(raw)
+
+        assert result["success"] is False
+        assert "timed out" in result["content"]
+        assert _mock_run_cli.call_count == 1
+
+    @pytest.mark.usefixtures("_mock_which_claude")
+    async def test_probe_timeout_skips_to_next(self, _mock_run_cli: AsyncMock) -> None:
+        """Claude times out → probe sonnet times out → probe haiku OK → retry haiku."""
+        _mock_run_cli.side_effect = [
+            asyncio.TimeoutError(),          # original
+            asyncio.TimeoutError(),          # probe sonnet
+            ProcessResult(returncode=0, stdout_lines=_claude_lines("ok"), stderr=""),  # probe haiku
+            ProcessResult(returncode=0, stdout_lines=_claude_lines("haiku ok"), stderr=""),  # retry haiku
+        ]
+
+        raw = await claude_tool(prompt="hello", cd="/tmp")
+        result = json.loads(raw)
+
+        assert result["success"] is True
+        assert "[fallback: haiku]" in result["content"]
+        assert _mock_run_cli.call_count == 4
+
+
+# ---------------------------------------------------------------------------
+# Server error fallback: 5xx errors trigger same fallback as rate limits
+# ---------------------------------------------------------------------------
+
+class TestServerErrorFallback:
+    @pytest.mark.usefixtures("_mock_which_gemini")
+    async def test_gemini_server_error_fallback(self, _mock_run_cli: AsyncMock) -> None:
+        """Gemini returns 503 → retry with flash."""
+        _mock_run_cli.side_effect = [
+            ProcessResult(returncode=1, stdout_lines=["503 service unavailable"], stderr=""),
+            ProcessResult(returncode=0, stdout_lines=_gemini_lines("flash ok"), stderr=""),
+        ]
+
+        raw = await gemini_tool(prompt="hello", cd="/tmp")
+        result = json.loads(raw)
+
+        assert result["success"] is True
+        assert "[fallback: flash]" in result["content"]
+        assert _mock_run_cli.call_count == 2
+
+    @pytest.mark.usefixtures("_mock_which_claude")
+    async def test_claude_server_error_fallback(self, _mock_run_cli: AsyncMock) -> None:
+        """Claude returns internal server error → probe sonnet → retry."""
+        _mock_run_cli.side_effect = [
+            ProcessResult(returncode=1, stdout_lines=["internal server error"], stderr=""),
+            ProcessResult(returncode=0, stdout_lines=_claude_lines("ok"), stderr=""),
+            ProcessResult(returncode=0, stdout_lines=_claude_lines("sonnet ok"), stderr=""),
+        ]
+
+        raw = await claude_tool(prompt="hello", cd="/tmp")
+        result = json.loads(raw)
+
+        assert result["success"] is True
+        assert "[fallback: sonnet]" in result["content"]
+        assert _mock_run_cli.call_count == 3
+
+    @pytest.mark.usefixtures("_mock_which_codex")
+    async def test_codex_server_error_fallback(self, _mock_run_cli: AsyncMock) -> None:
+        """Codex returns server error → fallback to medium effort."""
+        server_err_lines = [
+            '{"type":"thread.started","thread_id":"x-001"}',
+            '{"type":"error","message":"500 internal server error"}',
+            '{"type":"turn.failed","error":{"message":"server error"}}',
+        ]
+        _mock_run_cli.side_effect = [
+            ProcessResult(returncode=1, stdout_lines=server_err_lines, stderr=""),
+            ProcessResult(returncode=0, stdout_lines=_codex_lines("ok"), stderr=""),
+            ProcessResult(returncode=0, stdout_lines=_codex_lines("medium ok"), stderr=""),
+        ]
+
+        raw = await codex_tool(prompt="hello", cd="/tmp")
+        result = json.loads(raw)
+
+        assert result["success"] is True
+        assert "[fallback: effort=medium]" in result["content"]
         assert _mock_run_cli.call_count == 3
