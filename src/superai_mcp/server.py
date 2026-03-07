@@ -492,6 +492,7 @@ async def codex_tool(
     system_prompt: str = "",
     template: str = "",
     use_cache: bool = False,
+    stream: bool = False,
     timeout: float = 300.0,
 ) -> str:
     """Run Codex CLI for coding tasks, code review, or general prompts.
@@ -627,11 +628,12 @@ async def codex_tool(
             args.extend(prompt_args)
 
         progress_cb = _make_progress_cb(ctx, "codex", timeout)
+        stream_cb = _make_stream_cb(ctx, "codex") if stream else None
         result = None
         try:
             result = await run_cli(
                 "codex", args, cwd=cd, env=env, stdin_data=stdin_data,
-                on_progress=progress_cb, timeout=timeout,
+                on_progress=progress_cb, on_output=stream_cb, timeout=timeout,
             )
             parsed = parse_codex_output(result.stdout_lines, return_all=return_all_messages)
             if not parsed.model:
@@ -689,7 +691,8 @@ async def codex_tool(
                     retry_result = await run_cli(
                         "codex", retry_args, cwd=cd, env=env,
                         stdin_data=retry_stdin,
-                        on_progress=progress_cb, timeout=timeout,
+                        on_progress=progress_cb, on_output=stream_cb,
+                        timeout=timeout,
                     )
                 except asyncio.TimeoutError:
                     continue  # retry timed out, try next tier
@@ -740,6 +743,7 @@ async def gemini_tool(
     system_prompt: str = "",
     template: str = "",
     use_cache: bool = False,
+    stream: bool = False,
     timeout: float = 300.0,
 ) -> str:
     """Run Gemini CLI for coding tasks, code review, or general prompts.
@@ -849,11 +853,12 @@ async def gemini_tool(
             args.extend(["--resume", session_id])
 
         progress_cb = _make_progress_cb(ctx, "gemini", timeout)
+        stream_cb = _make_stream_cb(ctx, "gemini") if stream else None
         result = None
         try:
             result = await run_cli(
                 "gemini", args, cwd=cd, env=env, stdin_data=stdin_data,
-                on_progress=progress_cb, timeout=timeout,
+                on_progress=progress_cb, on_output=stream_cb, timeout=timeout,
             )
             parsed = parse_gemini_output(result.stdout_lines, return_all=return_all_messages)
             if not parsed.model:
@@ -873,7 +878,7 @@ async def gemini_tool(
             try:
                 retry_result = await run_cli(
                     "gemini", retry_args, cwd=cd, env=env, stdin_data=retry_stdin,
-                    on_progress=progress_cb, timeout=timeout,
+                    on_progress=progress_cb, on_output=stream_cb, timeout=timeout,
                 )
             except asyncio.TimeoutError:
                 retry_result = None
@@ -929,6 +934,7 @@ async def claude_tool(
     system_prompt: str = "",
     template: str = "",
     use_cache: bool = False,
+    stream: bool = False,
     timeout: float = 300.0,
 ) -> str:
     """Run Claude CLI for coding tasks, code review, or general prompts.
@@ -1054,11 +1060,12 @@ async def claude_tool(
 
         env = _child_env(_claude_env())
         progress_cb = _make_progress_cb(ctx, "claude", timeout)
+        stream_cb = _make_stream_cb(ctx, "claude") if stream else None
         result = None
         try:
             result = await run_cli(
                 "claude", args, cwd=cd, env=env, stdin_data=stdin_data,
-                on_progress=progress_cb, timeout=timeout,
+                on_progress=progress_cb, on_output=stream_cb, timeout=timeout,
             )
             parsed = parse_claude_stream_output(result.stdout_lines, return_all=return_all_messages)
             if not parsed.model:
@@ -1105,7 +1112,8 @@ async def claude_tool(
                 try:
                     retry_result = await run_cli(
                         "claude", retry_args, cwd=cd, env=env, stdin_data=retry_stdin,
-                        on_progress=progress_cb, timeout=timeout,
+                        on_progress=progress_cb, on_output=stream_cb,
+                        timeout=timeout,
                     )
                 except asyncio.TimeoutError:
                     continue  # retry timed out, try next tier
@@ -1166,6 +1174,7 @@ async def broadcast_tool(
     system_prompt: str = "",
     template: str = "",
     use_cache: bool = False,
+    stream: bool = False,
     timeout: float = 300.0,
 ) -> str:
     """Broadcast the same prompt to multiple CLI tools in parallel.
@@ -1245,6 +1254,7 @@ async def broadcast_tool(
         "return_all_messages": return_all_messages,
         "system_prompt": system_prompt,
         "use_cache": use_cache,
+        "stream": stream,
         "timeout": timeout,
     }
 
