@@ -43,6 +43,7 @@ async def run_cli(
     stdin_data: bytes | None = None,
     timeout: float = 900.0,
     on_progress: Callable[[float, str], Awaitable[None]] | None = None,
+    on_output: Callable[[str], Awaitable[None]] | None = None,
 ) -> ProcessResult:
     """Run a CLI command asynchronously and capture output.
 
@@ -91,7 +92,10 @@ async def run_cli(
             raw = await stream.readline()
             if not raw:
                 break
-            stdout_lines.append(raw.decode("utf-8", errors="replace").rstrip("\r\n"))
+            line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+            stdout_lines.append(line)
+            if on_output is not None:
+                await on_output(line)
         return stdout_lines
 
     async def drain_all(stream: asyncio.StreamReader) -> str:

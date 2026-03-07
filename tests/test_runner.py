@@ -237,3 +237,53 @@ def test_process_result_frozen() -> None:
     r = ProcessResult(returncode=0, stdout_lines=["a"], stderr="")
     with pytest.raises(AttributeError):
         r.returncode = 1  # type: ignore[misc]
+
+
+async def test_on_output_called_per_line() -> None:
+    """on_output is called once per stdout line as it arrives."""
+    lines_received: list[str] = []
+
+    async def _on_output(line: str) -> None:
+        lines_received.append(line)
+
+    result = await run_cli("printf", ["line1\nline2\nline3"], on_output=_on_output)
+    assert result.returncode == 0
+    assert lines_received == ["line1", "line2", "line3"]
+
+
+async def test_on_output_none_default() -> None:
+    """on_output=None (default) works fine."""
+    result = await run_cli("echo", ["ok"], on_output=None)
+    assert result.returncode == 0
+    assert result.stdout_lines == ["ok"]
+
+
+async def test_on_output_with_progress() -> None:
+    """on_output and on_progress can coexist."""
+    output_lines: list[str] = []
+    progress_calls: list[float] = []
+
+    async def _on_output(line: str) -> None:
+        output_lines.append(line)
+
+    async def _on_progress(elapsed: float, latest: str) -> None:
+        progress_calls.append(elapsed)
+
+    import superai_mcp.runner as runner_mod
+    orig = runner_mod._PROGRESS_INTERVAL
+    runner_mod._PROGRESS_INTERVAL = 0.05
+
+    try:
+        result = await run_cli(
+            "sh", ["-c", "echo first; sleep 0.15; echo second"],
+            timeout=5.0,
+            on_progress=_on_progress,
+            on_output=_on_output,
+        )
+    finally:
+        runner_mod._PROGRESS_INTERVAL = orig
+
+    assert result.returncode == 0
+    assert "first" in output_lines
+    assert "second" in output_lines
+    assert len(progress_calls) >= 1
