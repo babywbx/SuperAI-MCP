@@ -22,8 +22,10 @@ Wraps **Gemini CLI**, **Codex CLI**, and **Claude CLI** as MCP tools, enabling C
 - 🔒 **Secure**: path traversal guard, git ref validation, no shell injection, nesting depth limit (max 5)
 - 📡 **Progress notifications**: `report_progress` keepalive every 5s during long tasks
 - ⏱️ **Timeout + grace period**: 300s default timeout, auto-extends when CLI is actively producing output (30s for new output / 120s for keyword match)
-- 🔄 **Rate-limit fallback**: automatic cascading degradation (Gemini→flash / Claude→sonnet→haiku / Codex effort downgrade)
+- 🔄 **Auto-retry fallback**: automatic cascading degradation on rate-limit, server error, or timeout (Gemini→flash / Claude→sonnet→haiku / Codex effort downgrade)
 - 📝 **System prompt**: `system_prompt` param injects system-level instructions
+- 📋 **Prompt templates**: `template` param wraps prompt with structured instructions (review, refactor, explain, test, debug, optimize)
+- 💰 **Cost tracking**: `usage` tool estimates cost from OpenRouter pricing data
 - 📦 **Large prompt support**: >200KB auto-piped via stdin to avoid OS ARG_MAX limits
 - 🏷️ **Tool annotations**: every tool includes `ToolAnnotations` metadata
 - 🤝 **Multi-model collaboration**: `chain` pipeline / `vote` consensus / `debate` iteration
@@ -163,6 +165,7 @@ Restart the CLI after configuration.
 | `return_all_messages` | bool | `False` | Return full event stream |
 | `auto_split` | bool | `False` | Auto-split large task into subtasks |
 | `system_prompt` | str | `""` | System-level instruction (injected as `<system>` tag) |
+| `template` | str | `""` | Prompt template: `review`, `refactor`, `explain`, `test`, `debug`, `optimize` |
 | `timeout` | float | `300` | Timeout in seconds |
 
 ### `gemini`
@@ -181,6 +184,7 @@ Restart the CLI after configuration.
 | `return_all_messages` | bool | `False` | Return full event stream |
 | `auto_split` | bool | `False` | Auto-split large task into subtasks |
 | `system_prompt` | str | `""` | System-level instruction (injected as `<system>` tag) |
+| `template` | str | `""` | Prompt template: `review`, `refactor`, `explain`, `test`, `debug`, `optimize` |
 | `timeout` | float | `300` | Timeout in seconds |
 
 ### `claude`
@@ -201,6 +205,7 @@ Restart the CLI after configuration.
 | `return_all_messages` | bool | `False` | Return full JSON |
 | `auto_split` | bool | `False` | Auto-split large task into subtasks |
 | `system_prompt` | str | `""` | System-level instruction (injected as `<system>` tag) |
+| `template` | str | `""` | Prompt template: `review`, `refactor`, `explain`, `test`, `debug`, `optimize` |
 | `timeout` | float | `300` | Timeout in seconds |
 
 ### `broadcast`
@@ -221,6 +226,7 @@ Broadcast the same prompt to multiple CLIs in parallel, returning aggregated res
 | `files` | list[str] | `None` | File list mode |
 | `return_all_messages` | bool | `False` | Return full event stream |
 | `system_prompt` | str | `""` | System-level instruction (injected as `<system>` tag) |
+| `template` | str | `""` | Prompt template: `review`, `refactor`, `explain`, `test`, `debug`, `optimize` |
 | `timeout` | float | `300` | Timeout in seconds |
 
 **Per-target overrides**: Use `overrides` to set any tool parameter individually per CLI target. Top-level parameters serve as defaults; `overrides` values take precedence. Priority for model: `overrides` > `models` > `model`.
@@ -313,7 +319,7 @@ Check real account-level usage quotas and rate limits. Reads local OAuth credent
 
 ### `usage`
 
-Show cumulative token usage and call counts across all CLI tools.
+Show cumulative token usage, call counts, and estimated cost (USD) across all CLI tools. Cost is estimated from OpenRouter pricing data (best-effort).
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -336,9 +342,9 @@ When a `model` parameter is provided, the tool validates the model name against 
 3️⃣ Files — read file contents and inject into prompt
 ```
 
-## 🔄 Rate-Limit Fallback
+## 🔄 Auto-Retry Fallback
 
-When a CLI returns a rate-limit error (`RESOURCE_EXHAUSTED`, `overloaded_error`, `429`, `rate_limit`, `quota`, etc.), the tool automatically cascades to a fallback. Before fallback, a short probe request verifies the target is reachable.
+When a CLI returns a retryable error (rate-limit, server error, or timeout), the tool automatically cascades to a fallback. Retryable patterns include `RESOURCE_EXHAUSTED`, `overloaded_error`, `429`, `5xx`, `timed out`, etc. Before fallback, a short probe request verifies the target is reachable.
 
 | CLI | Fallback Strategy | Example |
 |-----|-------------------|---------|

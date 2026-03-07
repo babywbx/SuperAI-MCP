@@ -22,8 +22,10 @@
 - 🔒 **安全**: 路径遍历防护、git ref 校验、无 shell 注入、嵌套深度限制 (最大 5 层)
 - 📡 **进度通知**: 长时间任务每 5s 发送 `report_progress` keepalive
 - ⏱️ **超时+宽限期**: 默认 300s 超时，CLI 活跃输出时自动延长 (30s 新输出 / 120s 关键词匹配)
-- 🔄 **配额回退**: 限流时自动级联降级（Gemini→flash / Claude→sonnet→haiku / Codex effort 降级）
+- 🔄 **自动重试回退**: 限流、服务器错误或超时时自动级联降级（Gemini→flash / Claude→sonnet→haiku / Codex effort 降级）
 - 📝 **系统提示**: `system_prompt` 参数注入系统级指令
+- 📋 **提示模板**: `template` 参数用结构化指令包装 prompt（review、refactor、explain、test、debug、optimize）
+- 💰 **费用追踪**: `usage` 工具基于 OpenRouter 定价数据估算费用
 - 📦 **大 prompt 支持**: >200KB 自动通过 stdin 传递，避免 OS ARG_MAX 限制
 - 🏷️ **工具注解**: 每个工具附带 `ToolAnnotations` 元数据
 - 🤝 **多模型协作**: `chain` 流水线 / `vote` 投票共识 / `debate` 辩论迭代
@@ -163,6 +165,7 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `return_all_messages` | bool | `False` | 返回完整事件流 |
 | `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
 | `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
+| `template` | str | `""` | 提示模板: `review`、`refactor`、`explain`、`test`、`debug`、`optimize` |
 | `timeout` | float | `300` | 超时秒数 |
 
 ### `gemini`
@@ -181,6 +184,7 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `return_all_messages` | bool | `False` | 返回完整事件流 |
 | `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
 | `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
+| `template` | str | `""` | 提示模板: `review`、`refactor`、`explain`、`test`、`debug`、`optimize` |
 | `timeout` | float | `300` | 超时秒数 |
 
 ### `claude`
@@ -201,6 +205,7 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `return_all_messages` | bool | `False` | 返回完整 JSON |
 | `auto_split` | bool | `False` | 自动拆分大任务为子任务执行 |
 | `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
+| `template` | str | `""` | 提示模板: `review`、`refactor`、`explain`、`test`、`debug`、`optimize` |
 | `timeout` | float | `300` | 超时秒数 |
 
 ### `broadcast`
@@ -221,6 +226,7 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 | `files` | list[str] | `None` | 文件列表模式 |
 | `return_all_messages` | bool | `False` | 返回完整事件流 |
 | `system_prompt` | str | `""` | 系统级指令 (注入 `<system>` 标签) |
+| `template` | str | `""` | 提示模板: `review`、`refactor`、`explain`、`test`、`debug`、`optimize` |
 | `timeout` | float | `300` | 超时秒数 |
 
 **按目标覆盖参数**：使用 `overrides` 为每个 CLI 单独设置任意参数。顶层参数作为默认值，`overrides` 中的值优先。模型优先级：`overrides` > `models` > `model`。
@@ -313,7 +319,7 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 
 ### `usage`
 
-查看累计的 token 用量和调用次数。
+查看累计的 token 用量、调用次数和估算费用 (USD)。费用基于 OpenRouter 定价数据估算（尽力而为）。
 
 | 参数 | 类型 | 默认 | 说明 |
 |------|------|------|------|
@@ -336,9 +342,9 @@ gemini mcp add super -- uvx --from git+https://github.com/babywbx/SuperAI-MCP.gi
 3️⃣ 文件模式 — 读取文件内容注入 prompt
 ```
 
-## 🔄 配额/限流回退
+## 🔄 自动重试回退
 
-当 CLI 返回限流错误（`RESOURCE_EXHAUSTED`、`overloaded_error`、`429`、`rate_limit`、`quota` 等）时，会自动级联降级重试。降级前先发一个短探测请求验证目标可用。
+当 CLI 返回可重试错误（限流、服务器错误或超时：`RESOURCE_EXHAUSTED`、`overloaded_error`、`429`、`5xx`、`timed out` 等）时，会自动级联降级重试。降级前先发一个短探测请求验证目标可用。
 
 | CLI | 回退策略 | 示例 |
 |-----|---------|------|
