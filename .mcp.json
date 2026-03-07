@@ -2,7 +2,7 @@
   "mcpServers": {
     "super": {
       "command": "uv",
-      "args": ["run", "--directory", "/Users/wbx/Developer/SuperAI-MCP", "superai-mcp"]
+      "args": ["run", "superai-mcp"]
     }
   }
 }

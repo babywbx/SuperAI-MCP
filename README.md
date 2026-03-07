@@ -56,7 +56,7 @@ claude mcp add super -s user --transport stdio -- uv run --directory /path/to/Su
 <details>
 <summary>Edit config manually</summary>
 
-Add to `~/.claude/mcp.json` (global) or `.mcp.json` (project-level):
+Add to `~/.claude.json` (global, under `mcpServers`) or `.mcp.json` (project-level):
 
 ```json
 {

@@ -56,7 +56,7 @@ claude mcp add super -s user --transport stdio -- uv run --directory /path/to/Su
 <details>
 <summary>手动编辑配置文件</summary>
 
-在 `~/.claude/mcp.json`（全局）或 `.mcp.json`（项目级）中添加：
+在 `~/.claude.json`（全局，`mcpServers` 字段下）或 `.mcp.json`（项目级）中添加：
 
 ```json
 {

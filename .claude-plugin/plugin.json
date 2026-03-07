@@ -1,0 +1,13 @@
+{
+  "name": "superai-mcp",
+  "description": "Multi-model AI collaboration tools wrapping Codex, Gemini, and Claude CLIs as MCP tools with broadcast, chain, vote, debate, and quota checking",
+  "version": "1.5.0",
+  "author": {
+    "name": "Babywbx",
+    "url": "https://github.com/babywbx"
+  },
+  "homepage": "https://github.com/babywbx/SuperAI-MCP",
+  "repository": "https://github.com/babywbx/SuperAI-MCP",
+  "license": "Apache-2.0",
+  "keywords": ["mcp", "multi-model", "codex", "gemini", "claude", "broadcast", "collaboration"]
+}
