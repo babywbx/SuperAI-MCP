@@ -88,6 +88,26 @@ claude mcp add super -s user --transport stdio -- uv run --directory /path/to/Su
 
 </details>
 
+<details>
+<summary>可选：安装插件获得 AI Skills 和斜杠命令</summary>
+
+```bash
+claude plugin marketplace add github:babywbx/SuperAI-MCP
+claude plugin install superai-mcp
+```
+
+**包含的 Skills：**
+
+| Skill | 说明 |
+|-------|------|
+| `using-superai-mcp` | 工具概览、调用约定、模型选择、常见错误 |
+| `multi-model-review` | 使用 `broadcast` 进行多模型代码审查的最佳实践 |
+| `quota-check` | 账户级配额查询指南 |
+
+**斜杠命令：** `/quota` — 快速查询所有 provider 的配额。
+
+</details>
+
 ### Codex CLI
 
 在 `~/.codex/config.toml` 中添加：

@@ -88,6 +88,26 @@ You can also allow specific tools only: `"mcp__super__codex"`, `"mcp__super__gem
 
 </details>
 
+<details>
+<summary>Optional: install plugin for AI skills and slash commands</summary>
+
+```bash
+claude plugin marketplace add github:babywbx/SuperAI-MCP
+claude plugin install superai-mcp
+```
+
+**Included skills:**
+
+| Skill | Description |
+|-------|-------------|
+| `using-superai-mcp` | Tool overview, calling conventions, model selection, common mistakes |
+| `multi-model-review` | Best practices for multi-model code review with `broadcast` |
+| `quota-check` | Guide for checking account-level quotas |
+
+**Slash command:** `/quota` — quick quota check for all providers.
+
+</details>
+
 ### Codex CLI
 
 Add to `~/.codex/config.toml`:
